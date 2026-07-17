@@ -12,3 +12,11 @@ reset:
       selector:
         entity:
           domain: automation
+
+rebuild_linked_entities:
+  name: Rebuild linked entities
+  description: >-
+    Immediately rebuilds the map of entities referenced by automations/scripts
+    used by the "Linked entities unavailable" sensor, instead of waiting for
+    the periodic safety-net rebuild. Use this right after editing a script's
+    content, since script edits have no dedicated reload event to react to.

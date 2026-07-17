@@ -9,5 +9,16 @@
     "abort": {
       "already_configured": "Automation Monitor is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Automation Monitor options",
+        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged.",
+        "data": {
+          "unavailable_threshold_minutes": "Unavailable threshold (minutes)"
+        }
+      }
+    }
   }
 }

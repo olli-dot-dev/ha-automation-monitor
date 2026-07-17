@@ -1,8 +1,11 @@
 # Automation Monitor
 
-A lightweight Home Assistant custom integration (HACS) that detects failed
-automation runs and exposes them as a structured sensor. No notifications,
-no dashboard card, no retention logic - detection and structured exposure
+A lightweight Home Assistant custom integration (HACS) with two structured
+sensors: one detects failed automation runs from trace data, the other
+proactively flags entities referenced by your automations/scripts that are
+stuck `unavailable` - a failure mode the trace-based sensor cannot see at
+all (see Linked entity unavailability detection). No notifications, no
+dashboard card, no retention logic - detection and structured exposure
 only. How you display or act on the data (Markdown card, `auto-entities`,
 your own automations, ...) is up to you.
 
@@ -49,11 +52,17 @@ automatically on the next successful run.
 
 ## Status
 
-Core logic implemented and validated live against a real HA 2026.7.1
-instance with all four cases from the Testing notes below (error,
-mid-sequence condition action, `stop: ... error: true`, `mode: single`
-re-trigger) - all four classify correctly. Not yet released via HACS;
-still MVP-scope only (no persistence across restarts, no notifications).
+Trace-based failure sensor: implemented and validated live against a real
+HA 2026.7.1 instance with all four cases from the Testing notes below
+(error, mid-sequence condition action, `stop: ... error: true`, `mode:
+single` re-trigger) - all four classify correctly.
+
+Linked-entity unavailability sensor: implemented, unit tested, live
+verification pending (see Testing notes) - built in response to a real
+production incident the trace-based sensor missed entirely.
+
+Not yet released via HACS; still MVP-scope only (no persistence across
+restarts, no notifications).
 
 ## Scope (MVP)
 
@@ -61,7 +70,10 @@ still MVP-scope only (no persistence across restarts, no notifications).
 - Detecting failed automation runs from trace data
 - One collection sensor with an attribute list of all currently failed automations
 - Clean separation of "real error" vs. "intended stop behaviour"
-- Config flow to enable (no options needed for MVP)
+- Proactively flagging entities referenced by automations/scripts that are
+  stuck `unavailable`, independent of whether the automation has actually
+  run (second sensor, see Linked entity unavailability detection)
+- Config flow to enable, plus an options flow for the unavailability threshold
 
 **Explicitly out of scope for now** (possible later)
 - Notifications
@@ -133,26 +145,84 @@ Fallback if trace access turns out too unstable: reduced scope via
 `system_log_event`, filtered on `logger: homeassistant.components.automation`
 and `level: ERROR`. Documented as a fallback, not the primary approach.
 
+## Linked entity unavailability detection
+
+A second, independent sensor for a failure mode the trace-based sensor
+above cannot see at all: a service call targeting an entity that's
+currently `unavailable` (e.g. an unresponsive Zigbee/Wi-Fi device) is
+silently skipped by HA's core service dispatch, with no trace error, log
+warning, or other signal - there's nothing for `classification.py` to
+classify. This sensor takes a different, proactive approach instead of
+waiting for an automation to run and fail:
+
+1. Find every entity referenced by your automations and scripts -
+   directly, or via a `device_id`/`area_id` target, resolved through the
+   entity/device registries (`entities_in_automation` / `entities_in_script`
+   and their device/area equivalents - the same functions behind HA's own
+   "Related" tab in the automation/script editor)
+2. Watch those entities' state
+3. If one has been continuously `unavailable` (not `unknown` - see below)
+   for longer than a configurable threshold, flag it
+
+Implemented in `linked_entities.py` (pure map-building/decision logic, no
+HA imports, unit tested) and `linked_entities_coordinator.py` (the
+HA-touching half: registry lookups, state-change tracking, per-entity
+timers). Fully independent of `coordinator.py`/`classification.py` - no
+shared state, so this feature can't regress the existing trace-based
+sensor.
+
+**Only `unavailable`, not `unknown`, counts.** `unknown` is often a
+legitimate state (right after HA restart, a template with no value yet)
+rather than a sign of a broken device; treating it as unavailable-like
+would risk false positives and undermine trust in the sensor, the same
+concern the trace-based sensor's classification already has to manage.
+
+**Threshold is configurable** via the integration's Options (Settings →
+Devices & Services → Automation Monitor → Configure), default 15 minutes
+- short enough to catch a stuck device promptly, long enough to not fire
+on routine reconnect blips.
+
+**Keeping the reference map fresh**: rebuilt on automation reload
+(`automation_reloaded` event), on automation/script add/rename/delete
+(`entity_registry_updated`), on HA startup, and as a periodic safety net
+every 20 minutes - the last one exists because there is no equivalent
+`script_reloaded` event, so a script's *content* changing (without
+adding/removing the script entity itself) has no dedicated event to react
+to. Call the `automation_monitor.rebuild_linked_entities` service for an
+immediate rebuild instead of waiting up to 20 minutes after a script edit.
+
+Templated `entity_id`/`device_id`/`area_id` targets are not resolvable
+statically - same limitation Watchman already has for entity-existence
+checks, just for availability instead of existence. Like the trace access
+above, this relies on internal-ish HA behavior (event names, registry
+helper functions) that isn't a fully documented stable API - see Testing
+notes for what's been checked live so far.
+
 ## Architecture
 
-- `DataUpdateCoordinator`-based, but event-driven instead of polling
-  (updates on every `automation_triggered` event, no fixed interval)
+- `DataUpdateCoordinator`-based, but event-driven instead of polling for
+  both sensors (the failure sensor updates on every `automation_triggered`
+  event; the linked-entities sensor on state changes + per-entity timers,
+  see above) - no fixed polling interval for detection itself, aside from
+  the documented periodic reference-map safety net
 - Config entry with no external connection - pure event-listener integration
 - `iot_class: local_push`
 
 ```
 custom_components/automation_monitor/
-├── __init__.py          # setup, event listener registration
-├── config_flow.py       # minimal config flow (enable only)
-├── coordinator.py        # event handling, trace fetch, classification
-├── classification.py     # pure classification rules (no HA imports, unit tested)
-├── sensor.py              # collection sensor
+├── __init__.py                    # setup, both coordinators, service registration
+├── config_flow.py                 # config flow (enable) + options flow (threshold)
+├── coordinator.py                  # failure sensor: event handling, trace fetch, classification
+├── classification.py               # pure classification rules (no HA imports, unit tested)
+├── linked_entities_coordinator.py  # linked-entities sensor: registry lookups, state tracking, timers
+├── linked_entities.py              # pure map-building/decision logic (no HA imports, unit tested)
+├── sensor.py                       # both collection sensors
 └── manifest.json
 ```
 
 ## Data model
 
-One sensor:
+Two sensors:
 
 ```yaml
 sensor.failed_automations
@@ -169,6 +239,26 @@ sensor.failed_automations
 A successful run of the same automation removes it from the list - no
 history/retention in the MVP, this is "current state" only.
 
+```yaml
+sensor.linked_entities_unavailable
+  state: <number of currently flagged entities>
+  attributes:
+    entities:
+      - entity_id: light.hallway
+        name: "Hallway Light"
+        state: "unavailable"
+        unavailable_since: "2026-07-10T14:32:00+02:00"
+        referenced_by:
+          - automation.garden_watering
+          - script.night_routine
+```
+
+An entity is removed from the list as soon as it stops being
+`unavailable` - same "current state, no retention" model as the other
+sensor. `unavailable_since` is when the entity's state actually last
+changed (per HA), not when it crossed the threshold - it can be well
+before the entity was flagged.
+
 ## Actions
 
 `automation_monitor.reset` clears currently tracked failures without
@@ -176,6 +266,13 @@ waiting for a restart or for each automation to succeed again:
 
 - No target: clears all currently tracked failures.
 - `entity_id: automation.xyz`: clears only that automation's entry, if present.
+
+`automation_monitor.rebuild_linked_entities` immediately rebuilds the
+automation/script → referenced-entity map used by the linked-entities
+sensor, instead of waiting for the periodic 20-minute safety-net rebuild.
+No target/fields - useful right after editing a script's content (see
+Linked entity unavailability detection for why scripts specifically need
+this).
 
 ## Recommended display (documentation only, not part of the integration)
 
@@ -262,6 +359,22 @@ All four verified live against a real HA 2026.7.1 instance:
 - ✅ `mode: single` automation re-triggered while still running - must
   **not** count as a failure (in practice HA rejects the second trigger
   before `automation_triggered` even fires, see Failure classification)
+
+**Linked entity unavailability detection** - unit tested (`build_reference_map`,
+`decide_transition`, `time_remaining_until_flag`, all pure), but not yet
+verified live. Still pending:
+
+- ⬜ `entities_in_automation`/`entities_in_script` device/area resolution
+  against a real automation using `target: device_id:`/`target: area_id:`
+- ⬜ A real device transitioning to `unavailable` and back, including a
+  rapid flap, correctly starting/cancelling the timer and never resetting
+  on attribute-only noise
+- ⬜ Options flow round-trip (form shows current value, saving triggers a
+  reload, new threshold takes effect)
+- ⬜ Whether 2026.7.1 has grown a `script_reloaded`-equivalent event (if
+  so, the periodic safety-net rebuild could be dropped)
+- ⬜ `OptionsFlow.config_entry` property availability on 2026.7.1 (the
+  pattern used here assumes a modern HA version - see `config_flow.py`)
 
 ## Development
 
