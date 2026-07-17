@@ -1,5 +1,15 @@
 # Automation Monitor
 
+<!-- TODO: add a logo/icon image here once available, e.g.:
+<p align="center">
+  <img src="custom_components/automation_monitor/brand/logo.png" width="96" alt="Automation Monitor logo">
+</p>
+-->
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/olli-dot-dev/ha-automation-monitor)](https://github.com/olli-dot-dev/ha-automation-monitor/releases)
+![Maintenance](https://img.shields.io/maintenance/yes/2026.svg)
+
 A lightweight Home Assistant custom integration (HACS) with two structured
 sensors: one detects failed automation runs from trace data, the other
 proactively flags entities referenced by your automations/scripts that are
@@ -8,6 +18,14 @@ all (see Linked entity unavailability detection). No notifications, no
 dashboard card, no retention logic - detection and structured exposure
 only. How you display or act on the data (Markdown card, `auto-entities`,
 your own automations, ...) is up to you.
+
+<!-- TODO: add a screenshot once available, e.g. of the Developer Tools
+"States" view for sensor.failed_automations, or a Markdown card built from
+the Recommended display example below:
+![Automation Monitor screenshot](assets/screenshot.png)
+-->
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 Complementary to [Watchman](https://github.com/dummylabs/thewatchman),
 which checks *statically* for missing entities/services in your config.
@@ -86,6 +104,61 @@ restarts, no notifications).
 - Error categorisation/grouping
 - Logbook entries
 - Per-automation sensors
+
+## Requirements
+
+- Home Assistant 2024.1 or newer
+- [HACS](https://hacs.xyz/) installed (for the HACS installation method below;
+  not required for a manual install)
+
+## Installation
+
+Not yet published to the default HACS store (see Status) - install via a
+custom repository for now.
+
+### Via HACS (custom repository)
+
+1. Open HACS in your Home Assistant sidebar
+2. Go to **⋮ → Custom repositories**
+3. Add `https://github.com/olli-dot-dev/ha-automation-monitor` with category **Integration**
+4. Find **Automation Monitor** in the HACS integration list and click **Download**
+5. Restart Home Assistant
+
+### Manual
+
+1. Copy the `custom_components/automation_monitor` folder into your HA `config/custom_components/` directory
+2. Restart Home Assistant
+
+## Setup
+
+After installation and restart:
+
+1. Go to **Settings → Devices & Services → + Add Integration**
+2. Search for **Automation Monitor** and click it
+3. Confirm - no configuration needed to enable it
+
+Both `sensor.failed_automations` and `sensor.linked_entities_unavailable`
+appear immediately. To change the linked-entities threshold afterward,
+open the integration's entry and click **Configure** (see Linked entity
+unavailability detection).
+
+## Usage
+
+Both sensors work passively once installed - there's nothing to trigger
+manually day to day:
+
+- **`sensor.failed_automations`** reflects currently-failing automations in
+  its `automations` attribute; see Data model for the exact shape, and
+  Recommended display / Recommended notification automation below for
+  ready-to-use ways to surface it on a dashboard or as a notification
+- **`sensor.linked_entities_unavailable`** reflects entities referenced by
+  your automations/scripts that have been unreachable past the configured
+  threshold, in its `entities` attribute
+- Call `automation_monitor.reset` to clear a stuck failure entry without
+  waiting for a restart or a successful re-run (see Actions)
+- Call `automation_monitor.rebuild_linked_entities` right after editing a
+  script's content, to pick up the change immediately instead of waiting
+  for the periodic safety-net rebuild (see Actions)
 
 ## Failure classification
 
@@ -394,3 +467,26 @@ against a real state transition yet:
 pip install -r requirements_test.txt
 pytest
 ```
+
+Unit tests cover `classification.py` and `linked_entities.py` only - both
+are deliberately dependency-free (no `homeassistant` import), loaded
+directly by file path in `tests/` so they can run without installing HA.
+Everything that touches HA itself (coordinators, config/options flow,
+the trace API, entity/device registries) has to be verified live against
+a real Home Assistant instance instead - see Testing notes for what's
+been checked and what's still pending.
+
+## Contributing
+
+1. Fork the repository
+2. Drop `custom_components/automation_monitor` into your HA `config/custom_components/`
+3. Restart Home Assistant after changes to any `.py` file - reloading the
+   integration from Settings → Devices & Services is **not** enough, since
+   a reload re-runs the already-imported module rather than re-reading it
+   from disk
+4. Run `pytest` (see above) before opening a PR
+5. Open a pull request
+
+## License
+
+[MIT](LICENSE)
