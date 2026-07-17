@@ -57,9 +57,13 @@ HA 2026.7.1 instance with all four cases from the Testing notes below
 (error, mid-sequence condition action, `stop: ... error: true`, `mode:
 single` re-trigger) - all four classify correctly.
 
-Linked-entity unavailability sensor: implemented, unit tested, live
-verification pending (see Testing notes) - built in response to a real
-production incident the trace-based sensor missed entirely.
+Linked-entity unavailability sensor: implemented, unit tested, deployed
+live without error (entity loads with the expected empty baseline, options
+flow renders and saves correctly) - built in response to a real production
+incident the trace-based sensor missed entirely. The core new mechanism
+(device/area target resolution, and the unavailable→flagged timer path
+itself) has not yet been exercised against a real state transition - see
+Testing notes.
 
 Not yet released via HACS; still MVP-scope only (no persistence across
 restarts, no notifications).
@@ -361,20 +365,28 @@ All four verified live against a real HA 2026.7.1 instance:
   before `automation_triggered` even fires, see Failure classification)
 
 **Linked entity unavailability detection** - unit tested (`build_reference_map`,
-`decide_transition`, `time_remaining_until_flag`, all pure), but not yet
-verified live. Still pending:
+`decide_transition`, `time_remaining_until_flag`, all pure). Live-verified
+against a real HA 2026.7.1 instance:
+
+- ✅ Deploys and loads without error; `sensor.linked_entities_unavailable`
+  shows the expected empty baseline (`state: 0`, `entities: []`) when
+  nothing tracked is unavailable
+- ✅ Options flow opens with the threshold field pre-filled and saves
+  correctly (confirms `OptionsFlow.config_entry` is available without
+  manually assigning it in `__init__`, see `config_flow.py`)
+
+Still pending - the actual detection mechanism hasn't been exercised
+against a real state transition yet:
 
 - ⬜ `entities_in_automation`/`entities_in_script` device/area resolution
   against a real automation using `target: device_id:`/`target: area_id:`
+  (a real automation using `target: area_id: kuche` exists on the test
+  instance as a candidate)
 - ⬜ A real device transitioning to `unavailable` and back, including a
   rapid flap, correctly starting/cancelling the timer and never resetting
   on attribute-only noise
-- ⬜ Options flow round-trip (form shows current value, saving triggers a
-  reload, new threshold takes effect)
 - ⬜ Whether 2026.7.1 has grown a `script_reloaded`-equivalent event (if
   so, the periodic safety-net rebuild could be dropped)
-- ⬜ `OptionsFlow.config_entry` property availability on 2026.7.1 (the
-  pattern used here assumes a modern HA version - see `config_flow.py`)
 
 ## Development
 
