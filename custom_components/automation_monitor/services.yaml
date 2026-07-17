@@ -1,0 +1,14 @@
+reset:
+  name: Reset
+  description: >-
+    Clears currently tracked failed automations. With no target, clears all
+    of them; with an automation entity given, clears only that one.
+  fields:
+    entity_id:
+      name: Automation
+      description: Only clear this automation's failure entry, if present.
+      required: false
+      example: automation.bewaesserung_garten
+      selector:
+        entity:
+          domain: automation
