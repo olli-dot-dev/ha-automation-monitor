@@ -190,6 +190,47 @@ content: >
   {% endfor %}
 ```
 
+## Recommended notification automation (documentation only, not part of the integration)
+
+Fires only when the failure count *increases* (a genuinely new failure),
+not on every state write and not when the count drops from a reset or a
+retry succeeding. Diffs the `automations` list against its previous value
+so the notification only covers the newly-added entries, even if several
+failures land in the same update.
+
+```yaml
+automation:
+  - alias: "Notify on new automation failure"
+    triggers:
+      - trigger: state
+        entity_id: sensor.automation_monitor_failed
+    condition: >
+      {{ trigger.to_state.state | int(0) > trigger.from_state.state | int(0) }}
+    actions:
+      - variables:
+          previous_ids: >
+            {{ trigger.from_state.attributes.automations
+               | default([]) | map(attribute='entity_id') | list }}
+          new_failures: >
+            {{ trigger.to_state.attributes.automations
+               | rejectattr('entity_id', 'in', previous_ids) | list }}
+      - repeat:
+          for_each: "{{ new_failures }}"
+          sequence:
+            - action: notify.notify
+              data:
+                title: "Automation failed: {{ repeat.item.name }}"
+                message: >
+                  {{ repeat.item.error_message }}
+                  ({{ repeat.item.error_step }}, {{ repeat.item.last_error_time }})
+    mode: queued
+```
+
+Replace `notify.notify` with a specific notify target (e.g.
+`notify.mobile_app_your_phone`). `mode: queued` so that failures arriving
+in quick succession each still get their own notification instead of
+cancelling one another.
+
 ## Open questions
 
 - ~~Delay between `automation_triggered` and trace fetch: fixed timeout or
