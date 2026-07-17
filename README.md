@@ -32,14 +32,13 @@ Where Automation Monitor is the *only* thing that catches the problem -
 because the config is perfectly valid and the failure only exists at
 runtime:
 
-- A service call to an entity that exists, but whose device is
-  temporarily offline/unresponsive (Zigbee/Wi-Fi dropout, timeout)
 - A template that's syntactically valid but hits `None` or a missing key
   at runtime, depending on live state
 - A deliberate `stop: ... error: true` - not a config problem at all, so
   Repairs never sees it (verified live, see Testing notes)
 - A cloud-integration service call that fails due to that service's own
-  backend/network issues
+  backend/network issues, *provided* the integration actually raises on
+  failure instead of swallowing it
 
 Also, structurally: Repairs is a one-off, UI-only, per-issue list tied
 to the *config* (dismiss it and it's gone until the same issue recurs).
