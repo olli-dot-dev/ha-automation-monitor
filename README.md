@@ -215,7 +215,7 @@ actions:
   - repeat:
       for_each: "{{ new_failures }}"
       sequence:
-        - action: notify.notify
+        - action: notify.notify  # replace with your actual notify target, e.g. notify.mobile_app_your_phone
           data:
             title: "Automation failed: {{ repeat.item.name }}"
             message: >
