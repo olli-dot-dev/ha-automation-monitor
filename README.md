@@ -156,7 +156,7 @@ custom_components/automation_monitor/
 One sensor:
 
 ```yaml
-sensor.automation_monitor_failed
+sensor.failed_automations
   state: <number of currently failed automations>
   attributes:
     automations:
@@ -183,7 +183,7 @@ waiting for a restart or for each automation to succeed again:
 ```yaml
 type: markdown
 content: >
-  {% for a in state_attr('sensor.automation_monitor_failed', 'automations') %}
+  {% for a in state_attr('sensor.failed_automations', 'automations') %}
   **{{ a.name }}** - {{ a.last_error_time }}
   {{ a.error_message }}
 
@@ -203,7 +203,7 @@ automation:
   - alias: "Notify on new automation failure"
     triggers:
       - trigger: state
-        entity_id: sensor.automation_monitor_failed
+        entity_id: sensor.failed_automations
     condition: >
       {{ trigger.to_state.state | int(0) > trigger.from_state.state | int(0) }}
     actions:
