@@ -367,6 +367,18 @@ content: >
   {% endfor %}
 ```
 
+Same pattern for the linked-entities sensor, using its `entities` attribute:
+
+```yaml
+type: markdown
+content: >
+  {% for e in state_attr('sensor.linked_entities_unavailable', 'entities') %}
+  **{{ e.name }}** - unavailable since {{ e.unavailable_since }}
+  Used by: {{ e.referenced_by | join(', ') }}
+
+  {% endfor %}
+```
+
 ## Recommended notification automation (documentation only, not part of the integration)
 
 Fires only when the failure count *increases* (a genuinely new failure),
