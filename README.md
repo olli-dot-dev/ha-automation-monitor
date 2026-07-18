@@ -1,10 +1,8 @@
 # Automation Monitor
 
-<!-- TODO: add a logo/icon image here once available, e.g.:
 <p align="center">
   <img src="custom_components/automation_monitor/brand/logo.png" width="96" alt="Automation Monitor logo">
 </p>
--->
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/v/release/olli-dot-dev/ha-automation-monitor)](https://github.com/olli-dot-dev/ha-automation-monitor/releases)
