@@ -114,7 +114,13 @@ restarts, no notifications).
 Not yet published to the default HACS store (see Status) - install via a
 custom repository for now.
 
-### Via HACS (custom repository)
+### One-click (recommended)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=olli-dot-dev&repository=ha-automation-monitor&category=integration)
+
+Click the badge above to add this repository to HACS directly - it handles adding the custom repository and finding the integration for you. Then click **Download** and restart Home Assistant.
+
+### Via HACS (custom repository, manual)
 
 1. Open HACS in your Home Assistant sidebar
 2. Go to **⋮ → Custom repositories**
