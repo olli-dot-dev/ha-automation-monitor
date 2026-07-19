@@ -103,48 +103,6 @@ dashboard, and doesn't reflect "is this currently failing right now,
 and since when" the way this integration's sensor does - it clears
 automatically on the next successful run.
 
-## Status
-
-Trace-based failure sensor: implemented and validated live against a real
-HA 2026.7.1 instance with all four cases from the Testing notes below
-(error, mid-sequence condition action, `stop: ... error: true`, `mode:
-single` re-trigger) - all four classify correctly.
-
-Linked-entity unavailability sensor: implemented, unit tested, deployed
-live without error (entity loads with the expected empty baseline, options
-flow renders and saves correctly) - built in response to a real production
-incident the trace-based sensor missed entirely. The core new mechanism
-(device/area target resolution, and the unavailable→flagged timer path
-itself) has not yet been exercised against a real state transition - see
-Testing notes.
-
-Not yet released via HACS; still MVP-scope only (no persistence across
-restarts, no notifications).
-
-## Scope (MVP)
-
-**In scope**
-- Detecting failed automation runs from trace data
-- One collection sensor with an attribute list of all currently failed automations
-- Clean separation of "real error" vs. "intended stop behaviour"
-- Proactively flagging entities referenced by automations/scripts that are
-  stuck `unavailable`, independent of whether the automation has actually
-  run (second sensor, see Linked entity unavailability detection)
-- Config flow to enable, plus an options flow for the unavailability
-  threshold, an entity ignore-list, and a persistent-notification toggle
-  per sensor (see Persistent notifications)
-- Optional persistent (in-UI) notification per sensor, off by default
-
-**Explicitly out of scope for now** (possible later)
-- Push/mobile notifications built into the integration itself (the
-  persistent notification above is HA's in-UI notification only - wire up
-  your own automation, see Recommended notification automation, for push)
-- A dedicated Lovelace card
-- Retention rules (how long a failure stays listed / when it counts as resolved)
-- Error categorisation/grouping
-- Logbook entries
-- Per-automation sensors
-
 ## Requirements
 
 - Home Assistant 2024.1 or newer
@@ -153,8 +111,8 @@ restarts, no notifications).
 
 ## Installation
 
-Not yet published to the default HACS store (see Status) - install via a
-custom repository for now.
+Not yet published to the default HACS store - install via a custom
+repository for now.
 
 ### One-click (recommended)
 
@@ -194,9 +152,9 @@ Both sensors work passively once installed - there's nothing to trigger
 manually day to day:
 
 - **`sensor.failed_automations`** reflects currently-failing automations in
-  its `automations` attribute; see Data model for the exact shape, and
-  Recommended display / Recommended notification automation below for
-  ready-to-use ways to surface it on a dashboard or as a notification
+  its `automations` attribute; see Recommended display / Recommended
+  notification automation below for ready-to-use ways to surface it on a
+  dashboard or as a notification
 - **`sensor.linked_entities_unavailable`** reflects entities referenced by
   your automations/scripts that have been unreachable past the configured
   threshold, in its `entities` attribute
@@ -399,79 +357,6 @@ push alert - for that, see Recommended notification automation below,
 which you can run alongside these toggles (they don't conflict; one
 updates a persistent card, the other fires a one-off notification per new
 failure).
-
-## Architecture
-
-- `DataUpdateCoordinator`-based, but event-driven instead of polling for
-  both sensors (the failure sensor updates on every `automation_triggered`
-  event; the linked-entities sensor on state changes + per-entity timers,
-  see above) - no fixed polling interval for detection itself, aside from
-  the documented periodic reference-map safety net
-- Config entry with no external connection - pure event-listener integration
-- `iot_class: local_push`
-
-```
-custom_components/automation_monitor/
-├── __init__.py                    # setup, both coordinators, service registration, notification wiring
-├── config_flow.py                 # config flow (enable) + options flow (threshold, ignore-list, notify toggles)
-├── coordinator.py                  # failure sensor: event handling, trace fetch, classification
-├── classification.py               # pure classification rules (no HA imports, unit tested)
-├── linked_entities_coordinator.py  # linked-entities sensor: registry lookups, state tracking, timers
-├── linked_entities.py              # pure map-building/decision logic (no HA imports, unit tested)
-├── notifications.py                # pure notification message-building (no HA imports, unit tested)
-├── sensor.py                       # both collection sensors
-└── manifest.json
-```
-
-## Data model
-
-Two sensors:
-
-```yaml
-sensor.failed_automations
-  state: <number of currently failed automations>
-  attributes:
-    automations:
-      - entity_id: automation.garden_watering
-        unique_id: "1720600320000"  # the automation's config `id:`, used to link to its editor - see Persistent notifications
-        name: "Garden Watering"
-        last_error_time: "2026-07-10T14:32:00+02:00"
-        error_message: "Unable to find entity switch.garden_pump"
-        error_step: "action (step 2)"
-```
-
-A successful run of the same automation removes it from the list - no
-history/retention in the MVP, this is "current state" only.
-
-```yaml
-sensor.linked_entities_unavailable
-  state: <number of currently flagged entities>
-  attributes:
-    entities:
-      - entity_id: light.hallway
-        name: "Hallway Light"
-        state: "unavailable"
-        device_id: "c4fd7f4d297d4928675ff25c51553c7d"  # null if the entity has no device (helper/template entity) - see Persistent notifications
-        unavailable_since: "2026-07-10T14:32:00+02:00"
-        referenced_by:
-          - automation.garden_watering
-          - script.night_routine
-        referenced_by_details:  # same set, richer form - used by Persistent notifications to link each source to its editor
-          - entity_id: automation.garden_watering
-            name: "Garden Watering"
-            unique_id: "1720600320000"
-            domain: automation
-          - entity_id: script.night_routine
-            name: "Night Routine"
-            unique_id: "night_routine"
-            domain: script
-```
-
-An entity is removed from the list as soon as it stops being
-`unavailable` - same "current state, no retention" model as the other
-sensor. `unavailable_since` is when the entity's state actually last
-changed (per HA), not when it crossed the threshold - it can be well
-before the entity was flagged.
 
 ## Actions
 
