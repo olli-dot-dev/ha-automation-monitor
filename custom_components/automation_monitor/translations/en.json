@@ -14,9 +14,12 @@
     "step": {
       "init": {
         "title": "Automation Monitor options",
-        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged.",
+        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which entities to exclude from this check entirely, and whether to show a persistent notification for each sensor.",
         "data": {
-          "unavailable_threshold_minutes": "Unavailable threshold (minutes)"
+          "unavailable_threshold_minutes": "Unavailable threshold (minutes)",
+          "ignored_entities": "Ignored entities (never flagged)",
+          "notify_failed_automations": "Notify on failed automations",
+          "notify_linked_entities_unavailable": "Notify on unavailable linked entities"
         }
       }
     }

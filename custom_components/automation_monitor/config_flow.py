@@ -1,9 +1,10 @@
 """Config flow for Automation Monitor.
 
 Single-instance. Options flow added for the linked-entities-unavailable
-sensor's threshold (see linked_entities_coordinator.py) - the "no options
-needed for MVP" state this docstring used to describe is what this is the
-later addition to.
+sensor's threshold and ignore-list (see linked_entities_coordinator.py),
+plus a persistent-notification toggle per sensor (see notifications.py) -
+the "no options needed for MVP" state this docstring used to describe is
+what this is the later addition to.
 """
 
 from __future__ import annotations
@@ -12,9 +13,15 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
+    CONF_IGNORED_ENTITIES,
+    CONF_NOTIFY_FAILED_AUTOMATIONS,
+    CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
+    DEFAULT_IGNORED_ENTITIES,
+    DEFAULT_NOTIFY,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
     DOMAIN,
 )
@@ -41,8 +48,11 @@ class AutomationMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
-    """Single field: how many minutes a linked entity must stay
-    continuously unavailable before it's flagged.
+    """Fields: how many minutes a linked entity must stay continuously
+    unavailable before it's flagged, which entities to exclude from that
+    check entirely, and a persistent-notification toggle per sensor
+    (failed automations / unavailable linked entities - independent of
+    each other, see notifications.py).
 
     Deliberately does NOT set self.config_entry in an __init__ override -
     relies on the base class's own `config_entry` property, which current
@@ -58,14 +68,35 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options.get(
+        current_threshold = self.config_entry.options.get(
             CONF_UNAVAILABLE_THRESHOLD_MINUTES, DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES
+        )
+        current_ignored = self.config_entry.options.get(
+            CONF_IGNORED_ENTITIES, DEFAULT_IGNORED_ENTITIES
+        )
+        current_notify_failed = self.config_entry.options.get(
+            CONF_NOTIFY_FAILED_AUTOMATIONS, DEFAULT_NOTIFY
+        )
+        current_notify_linked = self.config_entry.options.get(
+            CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE, DEFAULT_NOTIFY
         )
         schema = vol.Schema(
             {
                 vol.Required(
-                    CONF_UNAVAILABLE_THRESHOLD_MINUTES, default=current
+                    CONF_UNAVAILABLE_THRESHOLD_MINUTES, default=current_threshold
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+                vol.Optional(
+                    CONF_IGNORED_ENTITIES, default=current_ignored
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(multiple=True)
+                ),
+                vol.Required(
+                    CONF_NOTIFY_FAILED_AUTOMATIONS, default=current_notify_failed
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
+                    default=current_notify_linked,
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

@@ -12,10 +12,12 @@ A lightweight Home Assistant custom integration (HACS) with two structured
 sensors: one detects failed automation runs from trace data, the other
 proactively flags entities referenced by your automations/scripts that are
 stuck `unavailable` - a failure mode the trace-based sensor cannot see at
-all (see Linked entity unavailability detection). No notifications, no
-dashboard card, no retention logic - detection and structured exposure
-only. How you display or act on the data (Markdown card, `auto-entities`,
-your own automations, ...) is up to you.
+all (see Linked entity unavailability detection). Optional persistent
+notifications, toggled independently per sensor (see Persistent
+notifications) - no dashboard card, no retention logic beyond that.
+Detection and structured exposure is the focus; how you display or act on
+the data (Markdown card, `auto-entities`, your own automations, ...) is
+up to you.
 
 <!-- TODO: add a screenshot once available, e.g. of the Developer Tools
 "States" view for sensor.failed_automations, or a Markdown card built from
@@ -29,6 +31,41 @@ Complementary to [Watchman](https://github.com/dummylabs/thewatchman),
 which checks *statically* for missing entities/services in your config.
 Automation Monitor covers the other half: *runtime* errors when an
 automation actually runs.
+
+## In plain terms
+
+Two different things can go wrong with an automation, and this
+integration watches for both:
+
+1. **"It ran, and it broke."** Your automation actually fired, and
+   something inside it went wrong (a light didn't respond, a step threw
+   an error). Like turning a car's key and hearing the engine cough.
+   → watched by **`sensor.failed_automations`**.
+2. **"It's already broken, waiting to happen."** A light, switch, or
+   other device your automation *uses* has gone offline - but no
+   automation has tried to use it yet, so nothing has failed *yet*.
+   Like a flat tire on a parked car: broken right now, you just haven't
+   driven anywhere to notice.
+   → watched by **`sensor.linked_entities_unavailable`**.
+
+Each is its own sensor, and they run completely independently of each
+other - use either one on its own, or both together:
+
+| Sensor | Catches | Example |
+| --- | --- | --- |
+| `sensor.failed_automations` | An automation ran and something in it errored out | A script step calls a service that fails |
+| `sensor.linked_entities_unavailable` | A device an automation *would use* is offline, whether or not that automation has run | A Zigbee light drops off the network |
+
+Both show up as data (a sensor with a list), not as a fix. This
+integration never changes anything in your house - it only watches and
+reports. What you do with that report (a notification, a dashboard, a
+follow-up automation) is entirely up to you.
+
+**What this can't do:** it can't catch a mistake *before* you save it
+(a typo'd device name, a setting that doesn't exist) - that's a config
+check, and HA's own Settings → System → Repairs (or the separate
+Watchman add-on) already does that well. This integration only speaks
+up once something has actually gone wrong, or is already sitting broken.
 
 ## Why not just use Watchman / HA's built-in Repairs?
 
@@ -93,10 +130,15 @@ restarts, no notifications).
 - Proactively flagging entities referenced by automations/scripts that are
   stuck `unavailable`, independent of whether the automation has actually
   run (second sensor, see Linked entity unavailability detection)
-- Config flow to enable, plus an options flow for the unavailability threshold
+- Config flow to enable, plus an options flow for the unavailability
+  threshold, an entity ignore-list, and a persistent-notification toggle
+  per sensor (see Persistent notifications)
+- Optional persistent (in-UI) notification per sensor, off by default
 
 **Explicitly out of scope for now** (possible later)
-- Notifications
+- Push/mobile notifications built into the integration itself (the
+  persistent notification above is HA's in-UI notification only - wire up
+  your own automation, see Recommended notification automation, for push)
 - A dedicated Lovelace card
 - Retention rules (how long a failure stays listed / when it counts as resolved)
 - Error categorisation/grouping
@@ -263,6 +305,15 @@ Devices & Services → Automation Monitor → Configure), default 15 minutes
 - short enough to catch a stuck device promptly, long enough to not fire
 on routine reconnect blips.
 
+**Entities can be ignored** via the same Options dialog - an entity picker
+(multi-select) lets you exclude specific entities from this check
+entirely, e.g. a device that's expected to be offline for long stretches
+on purpose. Ignored entities are dropped at reference-map build time, so
+they're never tracked or timed, and adding an already-flagged entity to
+the list unflags it on the next rebuild (options changes reload the
+config entry, which rebuilds from scratch - see `_async_options_updated`
+in `__init__.py`).
+
 **Keeping the reference map fresh**: rebuilt on automation reload
 (`automation_reloaded` event), on automation/script add/rename/delete
 (`entity_registry_updated`), on HA startup, and as a periodic safety net
@@ -279,6 +330,76 @@ above, this relies on internal-ish HA behavior (event names, registry
 helper functions) that isn't a fully documented stable API - see Testing
 notes for what's been checked live so far.
 
+## Persistent notifications
+
+Two independent toggles in the integration's Options (Settings → Devices
+& Services → Automation Monitor → Configure), off by default: one for
+`sensor.failed_automations`, one for `sensor.linked_entities_unavailable`.
+Enable either, both, or neither - they don't affect each other.
+
+Each enabled sensor gets exactly one persistent notification (HA's
+built-in in-UI notification, shown under the bell icon - **not** a push
+notification to your phone) under a fixed ID, so it's always updated in
+place rather than piling up a new card every time something changes:
+
+- While the sensor has anything to report, the notification lists every
+  currently-affected entity/automation, one line each - each name is a
+  clickable Markdown link, which HA's frontend opens in-app rather than
+  reloading the page:
+  - A **failed automation** links to its editor
+    (`/config/automation/edit/<unique_id>`) - the actionable next step is
+    to go fix it. Falls back to the entity settings link below if the
+    automation's unique_id can't be resolved for some reason.
+  - An **unavailable linked entity** links to its **device** page
+    (`/config/devices/device/<device_id>`) - the route pattern itself
+    is confirmed correct (the user copied a real, working URL in exactly
+    this shape straight from their own browser), though clicking the
+    link *from inside the notification* hasn't been done yet - see
+    Testing notes. Entities with no device (helpers, template entities,
+    ...) fall back to the entity settings page
+    (`/config/entities/entity/<entity_id>`) instead - **that fallback
+    route is this project's best guess, not independently verified live**.
+    Either way, if known, the entity link is followed by
+    "used by" links to every automation/script that references it
+    (`/config/automation/edit/...` or `/config/script/edit/...`, each
+    falling back to plain unlinked text if its own unique_id can't be
+    resolved). The `unavailable since` timestamp is formatted as
+    `YYYY-MM-DD HH:MM` in the local timezone, instead of the raw
+    ISO-8601 UTC string it's stored as internally - fixed after an
+    earlier version of this showed the correct-looking but actually
+    unconverted UTC clock value (e.g. `11:10` shown when it should have
+    read `13:10` local). Uses the *system* timezone (`.astimezone()`
+    with no argument, since `notifications.py` deliberately has no HA
+    imports and can't read `hass.config.time_zone` directly) - correct
+    as long as the machine's OS timezone matches HA's configured one,
+    which holds for a typical single-purpose HAOS install.
+- Once the sensor goes back to empty (nothing failed / nothing
+  unavailable), the notification is automatically dismissed
+- Turning a toggle off dismisses that sensor's notification immediately,
+  even if it was currently showing something
+- Saving *any* option (even an unrelated one, like the threshold) does
+  **not** clear an already-shown notification - only a genuine removal of
+  the integration does (see below). An earlier version of this got that
+  wrong: it dismissed both notifications on every config-entry reload,
+  which options changes also trigger, so saving the options form looked
+  like it had silently cleared real, still-true failures - it hadn't,
+  the notification just hadn't been told to redraw itself yet
+
+Message text is built by pure, unit-tested functions in `notifications.py`
+(`build_failed_automations_message` / `build_linked_entities_message`);
+`__init__.py` wires them to each coordinator via
+`coordinator.async_add_listener` and calls
+`persistent_notification.async_create`/`async_dismiss`. Actual dismissal
+on integration removal lives in `async_remove_entry`, which HA only calls
+on a genuine delete - not `async_unload_entry`, which also runs on every
+reload (see the point above). Not yet verified live, see Testing notes.
+
+This is meant for a quick, always-on-if-you-want-it status card, not a
+push alert - for that, see Recommended notification automation below,
+which you can run alongside these toggles (they don't conflict; one
+updates a persistent card, the other fires a one-off notification per new
+failure).
+
 ## Architecture
 
 - `DataUpdateCoordinator`-based, but event-driven instead of polling for
@@ -291,12 +412,13 @@ notes for what's been checked live so far.
 
 ```
 custom_components/automation_monitor/
-├── __init__.py                    # setup, both coordinators, service registration
-├── config_flow.py                 # config flow (enable) + options flow (threshold)
+├── __init__.py                    # setup, both coordinators, service registration, notification wiring
+├── config_flow.py                 # config flow (enable) + options flow (threshold, ignore-list, notify toggles)
 ├── coordinator.py                  # failure sensor: event handling, trace fetch, classification
 ├── classification.py               # pure classification rules (no HA imports, unit tested)
 ├── linked_entities_coordinator.py  # linked-entities sensor: registry lookups, state tracking, timers
 ├── linked_entities.py              # pure map-building/decision logic (no HA imports, unit tested)
+├── notifications.py                # pure notification message-building (no HA imports, unit tested)
 ├── sensor.py                       # both collection sensors
 └── manifest.json
 ```
@@ -311,6 +433,7 @@ sensor.failed_automations
   attributes:
     automations:
       - entity_id: automation.garden_watering
+        unique_id: "1720600320000"  # the automation's config `id:`, used to link to its editor - see Persistent notifications
         name: "Garden Watering"
         last_error_time: "2026-07-10T14:32:00+02:00"
         error_message: "Unable to find entity switch.garden_pump"
@@ -328,10 +451,20 @@ sensor.linked_entities_unavailable
       - entity_id: light.hallway
         name: "Hallway Light"
         state: "unavailable"
+        device_id: "c4fd7f4d297d4928675ff25c51553c7d"  # null if the entity has no device (helper/template entity) - see Persistent notifications
         unavailable_since: "2026-07-10T14:32:00+02:00"
         referenced_by:
           - automation.garden_watering
           - script.night_routine
+        referenced_by_details:  # same set, richer form - used by Persistent notifications to link each source to its editor
+          - entity_id: automation.garden_watering
+            name: "Garden Watering"
+            unique_id: "1720600320000"
+            domain: automation
+          - entity_id: script.night_routine
+            name: "Night Routine"
+            unique_id: "night_routine"
+            domain: script
 ```
 
 An entity is removed from the list as soon as it stops being
@@ -381,7 +514,9 @@ content: >
 
 ## Recommended notification automation (documentation only, not part of the integration)
 
-Fires only when the failure count *increases* (a genuinely new failure),
+Want a push notification instead of (or alongside) the built-in
+persistent-notification toggles from Persistent notifications above? Use
+this. Fires only when the failure count *increases* (a genuinely new failure),
 not on every state write and not when the count drops from a reset or a
 retry succeeding. Diffs the `automations` list against its previous value
 so the notification only covers the newly-added entries, even if several
@@ -454,8 +589,9 @@ All four verified live against a real HA 2026.7.1 instance:
   before `automation_triggered` even fires, see Failure classification)
 
 **Linked entity unavailability detection** - unit tested (`build_reference_map`,
-`decide_transition`, `time_remaining_until_flag`, all pure). Live-verified
-against a real HA 2026.7.1 instance:
+including its ignore-list filtering, `decide_transition`,
+`time_remaining_until_flag`, all pure). Live-verified against a real HA
+2026.7.1 instance:
 
 - ✅ Deploys and loads without error; `sensor.linked_entities_unavailable`
   shows the expected empty baseline (`state: 0`, `entities: []`) when
@@ -463,14 +599,40 @@ against a real HA 2026.7.1 instance:
 - ✅ Options flow opens with the threshold field pre-filled and saves
   correctly (confirms `OptionsFlow.config_entry` is available without
   manually assigning it in `__init__`, see `config_flow.py`)
+- ✅ `entities_in_automation`/`areas_in_automation` device/area resolution
+  against a real automation using `target: area_id: kuche` - correctly
+  resolved to the actual entities in that area (a media_player, several
+  switches/numbers), and - just as importantly - correctly did **not**
+  pick up an unrelated `unavailable` entity (`media_player.65_the_frame`)
+  that turned out to sit in the automation's `action:` field (a plain
+  service-name string) rather than an actual `target:`/`entity_id:`
+  reference; confirmed by inspecting the recorder DB directly rather than
+  relying on the sensor being right
+- ✅ `sensor.failed_automations` re-verified after the `unique_id`
+  addition: live data confirmed to include a correct `unique_id` per
+  entry (checked directly against the recorder DB)
 
-Still pending - the actual detection mechanism hasn't been exercised
-against a real state transition yet:
+Still pending:
 
-- ⬜ `entities_in_automation`/`entities_in_script` device/area resolution
-  against a real automation using `target: device_id:`/`target: area_id:`
-  (a real automation using `target: area_id: kuche` exists on the test
-  instance as a candidate)
+- ⬜ Options flow's new ignore-list field (`EntitySelector(multiple=True)`)
+  renders and saves correctly, and an ignored entity is actually excluded
+  after the resulting config-entry reload
+- ⬜ Persistent-notification toggles, as actually rendered in the HA
+  frontend (data correctness is confirmed via the recorder DB, see above,
+  but the notification card itself hasn't been eyeballed in a browser
+  yet): card appears when its sensor has data and the toggle is on,
+  updates in place rather than duplicating, clears itself once the
+  sensor goes back to empty, survives an unrelated options save (see
+  Persistent notifications for the bug this specifically checks for),
+  and disappears immediately when the toggle is switched off
+- ⬜ The new notification links, clicked for real (from inside the
+  notification itself, not just the URL pattern in isolation): a failed
+  automation's link opens its editor; an unavailable entity's device link
+  (`/config/devices/device/<id>`) opens the right device page; the
+  entity-settings fallback for device-less entities
+  (`/config/entities/entity/<id>`) actually opens something sensible -
+  this one is still this project's best guess, not confirmed; and each
+  "used by" source link opens the right automation/script editor
 - ⬜ A real device transitioning to `unavailable` and back, including a
   rapid flap, correctly starting/cancelling the timer and never resetting
   on attribute-only noise

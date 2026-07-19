@@ -77,6 +77,7 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
             self.data[entity_id] = {
                 "entity_id": entity_id,
                 "name": self._async_get_name(entity_id),
+                "unique_id": self._async_get_unique_id(entity_id),
                 "last_error_time": datetime.now().astimezone().isoformat(),
                 "error_message": self._build_error_message(trace, last_step),
                 "error_step": last_step or "unknown",
@@ -89,6 +90,16 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
     def _async_get_name(self, entity_id: str) -> str:
         state = self.hass.states.get(entity_id)
         return state.name if state else entity_id
+
+    def _async_get_unique_id(self, entity_id: str) -> str | None:
+        """The automation's config `id:` (stable across renames) - not its
+        entity_id's object_id. Used to link straight to the automation
+        editor (`/config/automation/edit/<unique_id>`) from the optional
+        persistent notification, see notifications.py. `None` if the
+        entity isn't in the registry for some reason - callers fall back
+        to a less specific link rather than erroring."""
+        registry_entry = er.async_get(self.hass).async_get(entity_id)
+        return registry_entry.unique_id if registry_entry else None
 
     @staticmethod
     def _step_had_error(trace: dict[str, Any], last_step: str | None) -> bool:

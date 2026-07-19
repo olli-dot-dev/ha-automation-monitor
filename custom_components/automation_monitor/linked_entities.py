@@ -27,13 +27,29 @@ UNAVAILABLE_LIKE_STATES = frozenset({"unavailable"})
 TransitionAction = Literal["start", "cancel", "noop"]
 
 
-def build_reference_map(source_entities: dict[str, Iterable[str]]) -> dict[str, list[str]]:
+def build_reference_map(
+    source_entities: dict[str, Iterable[str]],
+    ignored: Iterable[str] = (),
+) -> dict[str, list[str]]:
     """Pure inversion/merge: {source_id: {referenced ids}} ->
     {referenced_id: [source_ids]}, sorted for stable output.
+
+    `ignored` entities are dropped entirely - not just from the output, but
+    from consideration at all, so they're never tracked/timed/flagged
+    regardless of how long they stay unavailable. Filtering here (map-build
+    time) rather than at flag time means an ignored entity is
+    indistinguishable from one no longer referenced by anything, so the
+    coordinator's existing "dropped from map" cleanup (see
+    linked_entities_coordinator.async_rebuild) already handles unflagging
+    it if it was flagged before being added to the ignore list - no extra
+    code path needed.
     """
+    ignored_set = set(ignored)
     reference_map: dict[str, set[str]] = {}
     for source_id, referenced_ids in source_entities.items():
         for referenced_id in referenced_ids:
+            if referenced_id in ignored_set:
+                continue
             reference_map.setdefault(referenced_id, set()).add(source_id)
     return {
         referenced_id: sorted(source_ids)

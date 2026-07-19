@@ -49,6 +49,38 @@ def test_build_reference_map_entity_referenced_by_nothing_is_absent():
     assert build_reference_map(source) == {}
 
 
+def test_build_reference_map_ignored_entity_is_excluded():
+    source = {
+        "automation.a": {"light.x", "light.y"},
+        "script.b": {"light.x"},
+    }
+    assert build_reference_map(source, ignored={"light.x"}) == {
+        "light.y": ["automation.a"],
+    }
+
+
+def test_build_reference_map_ignoring_all_referenced_entities_gives_empty_map():
+    source = {"automation.a": {"light.x"}}
+    assert build_reference_map(source, ignored={"light.x"}) == {}
+
+
+def test_build_reference_map_ignored_entity_not_referenced_is_a_noop():
+    # Ignoring an entity that isn't referenced by anything shouldn't affect
+    # the map's other entries.
+    source = {"automation.a": {"light.x"}}
+    assert build_reference_map(source, ignored={"light.unrelated"}) == {
+        "light.x": ["automation.a"],
+    }
+
+
+def test_build_reference_map_no_ignored_argument_behaves_as_before():
+    # Default is an empty iterable, not a required argument - existing
+    # callers (and this test file's other tests) must keep working
+    # unchanged.
+    source = {"automation.a": {"light.x"}}
+    assert build_reference_map(source) == {"light.x": ["automation.a"]}
+
+
 # --- decide_transition -------------------------------------------------
 
 

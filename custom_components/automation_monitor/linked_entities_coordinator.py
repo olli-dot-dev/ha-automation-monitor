@@ -39,7 +39,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_IGNORED_ENTITIES,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
+    DEFAULT_IGNORED_ENTITIES,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
     DOMAIN,
     LINKED_ENTITIES_REBUILD_INTERVAL_MINUTES,
@@ -149,10 +151,12 @@ def async_collect_source_entities(hass: HomeAssistant) -> dict[str, set[str]]:
     return source
 
 
-def async_build_reference_map(hass: HomeAssistant) -> dict[str, list[str]]:
+def async_build_reference_map(
+    hass: HomeAssistant, ignored: set[str] | None = None
+) -> dict[str, list[str]]:
     """HA-touching half of the reference-map build: collect + invert in
     one call. See linked_entities.build_reference_map for the pure half."""
-    return build_reference_map(async_collect_source_entities(hass))
+    return build_reference_map(async_collect_source_entities(hass), ignored or ())
 
 
 class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -174,6 +178,12 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
     def _threshold_minutes(self) -> int:
         return self._entry.options.get(
             CONF_UNAVAILABLE_THRESHOLD_MINUTES, DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES
+        )
+
+    @property
+    def _ignored_entities(self) -> set[str]:
+        return set(
+            self._entry.options.get(CONF_IGNORED_ENTITIES, DEFAULT_IGNORED_ENTITIES)
         )
 
     @callback
@@ -215,7 +225,7 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
         """Rebuild the reference map, resubscribe to state changes for the
         new tracked set, and reconcile currently-tracked/flagged entities
         against what changed."""
-        new_map = async_build_reference_map(self.hass)
+        new_map = async_build_reference_map(self.hass, self._ignored_entities)
         old_tracked = set(self._reference_map)
         new_tracked = set(new_map)
         self._reference_map = new_map
@@ -316,14 +326,37 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
     @callback
     def _flag(self, entity_id: str, unavailable_since: datetime) -> None:
         state = self.hass.states.get(entity_id)
+        registry_entry = er.async_get(self.hass).async_get(entity_id)
+        referenced_by = self._reference_map.get(entity_id, [])
         self.data[entity_id] = {
             "entity_id": entity_id,
             "name": state.name if state else entity_id,
             "state": state.state if state else "unavailable",
+            "device_id": registry_entry.device_id if registry_entry else None,
             "unavailable_since": unavailable_since.isoformat(),
-            "referenced_by": self._reference_map.get(entity_id, []),
+            "referenced_by": referenced_by,
+            "referenced_by_details": [
+                self._async_describe_source(source_id) for source_id in referenced_by
+            ],
         }
         self.async_set_updated_data(self.data)
+
+    def _async_describe_source(self, source_entity_id: str) -> dict[str, Any]:
+        """Name/unique_id/domain for one automation/script referencing a
+        flagged entity - kept separate from the plain `referenced_by`
+        entity_id list (unchanged, still what the sensor attribute and
+        the README's example Markdown card use) so the persistent
+        notification (see notifications.py, which links each source
+        straight to its editor) can be enriched without changing that
+        existing, documented attribute shape."""
+        state = self.hass.states.get(source_entity_id)
+        registry_entry = er.async_get(self.hass).async_get(source_entity_id)
+        return {
+            "entity_id": source_entity_id,
+            "name": state.name if state else source_entity_id,
+            "unique_id": registry_entry.unique_id if registry_entry else None,
+            "domain": source_entity_id.split(".", 1)[0],
+        }
 
     @callback
     def _cancel_timer(self, entity_id: str) -> None:
