@@ -2,71 +2,71 @@
 
 All notable changes to Automation Monitor are documented here.
 
-## [Unreleased]
+## [0.6.0] - 2026-07-19
 
-- Fixed (found during live testing): the `unavailable since` timestamp in
-  the linked-entities notification showed the raw UTC clock value (e.g.
-  `11:10`) without converting it to local time, even though it was
-  displayed without a UTC marker and so read as if it already were local
-  (should have read `13:10`). `_format_timestamp` now calls
-  `.astimezone()` before formatting.
-- Added an entity ignore-list to the Options flow: entities added there are
-  excluded from the linked-entities-unavailable check entirely (never
-  tracked, never flagged), regardless of how long they stay unavailable -
-  useful for a device that's expected to be offline for long stretches on
-  purpose. Filtered at reference-map build time in `build_reference_map`
-  (`linked_entities.py`), so an already-flagged entity added to the list
-  is unflagged automatically on the next rebuild, via the same "dropped
-  from map" cleanup path used when an automation stops referencing an
-  entity - no separate code path needed. Not yet verified live against a
-  running HA instance - see Testing notes.
+- Added an entity ignore-list to the Options flow: entities added there
+  are excluded from the linked-entities-unavailable check entirely
+  (never tracked, never flagged), regardless of how long they stay
+  unavailable - useful for a device that's expected to be offline for
+  long stretches on purpose. Filtered at reference-map build time in
+  `build_reference_map` (`linked_entities.py`), so an already-flagged
+  entity added to the list is unflagged automatically on the next
+  rebuild, via the same "dropped from map" cleanup path used when an
+  automation stops referencing an entity - no separate code path
+  needed.
 - Added optional persistent (in-UI, not push) notifications, one toggle
   each for `sensor.failed_automations` and
   `sensor.linked_entities_unavailable` in the Options flow, off by
   default. Each sensor gets exactly one notification under a fixed ID
-  that's updated in place as its data changes and dismissed automatically
-  once the sensor goes back to empty (or the toggle is turned off).
-  Message text built by new pure, unit-tested functions in
-  `notifications.py`; wired to each coordinator via
-  `coordinator.async_add_listener` in `__init__.py`. Not yet verified
-  live against a running HA instance - see Testing notes.
+  that's updated in place as its data changes and dismissed
+  automatically once the sensor goes back to empty. Message text built
+  by new pure, unit-tested functions in `notifications.py`; wired to
+  each coordinator via `coordinator.async_add_listener` in
+  `__init__.py`. Live-verified (bell icon, not just the recorder DB) -
+  see Testing notes for the couple of narrower gaps still open (e.g.
+  toggling off specifically).
 - Each entity/automation name in a persistent notification is now a
   clickable Markdown link instead of plain text: a failed automation
   links to its editor (`/config/automation/edit/<unique_id>`); an
   unavailable linked entity links to its **device** page
-  (`/config/devices/device/<device_id>` - the route pattern is confirmed
-  correct, copied from a real working URL) if it has one, falling back to
+  (`/config/devices/device/<device_id>` - route pattern confirmed
+  correct against a real working URL) if it has one, falling back to
   its own entity settings page (`/config/entities/entity/<entity_id>` -
-  not independently verified live, see Testing notes) if it doesn't; and,
-  if known, is now followed by "used by" links to every automation/script
-  that references it, each linking straight to its own editor. All links
-  fall back to plain unlinked text rather than a dead link if the
-  unique_id/device_id they need couldn't be resolved.
-- `linked_entities_coordinator.py` now also resolves and stores each
-  flagged entity's `device_id` (via the entity registry), used by the
-  device-page link above.
-- Coordinator listeners that sync the persistent notifications (see
-  above) are now wrapped in a try/except with logging - previously an
-  exception there could in theory propagate out through
-  `async_set_updated_data` into whatever triggered the update instead of
-  just failing the notification. No live-confirmed instance of this
-  actually happening (an apparent "notification never showed up" turned
-  out to be pure timing, not a bug - a device's unavailable-timer kept
-  resetting across the repeated restarts during that testing session),
-  but the defensive fix and the debug logging it added were worth keeping.
+  not independently verified live, see Testing notes) if it doesn't;
+  and, if known, is now followed by "used by" links to every
+  automation/script that references it, each linking straight to its
+  own editor. All links fall back to plain unlinked text rather than a
+  dead link if the unique_id/device_id they need couldn't be resolved.
+  `linked_entities_coordinator.py` now resolves and stores each flagged
+  entity's `device_id`, and `referenced_by_details`
+  (name/unique_id/domain per referencing automation/script) alongside
+  the existing plain `referenced_by` entity_id list, which is unchanged.
 - The `unavailable since` timestamp in the linked-entities notification
-  is now formatted `YYYY-MM-DD HH:MM` instead of the raw ISO-8601 string.
+  is now formatted `YYYY-MM-DD HH:MM` in the local timezone (via
+  `.astimezone()`), instead of the raw ISO-8601 UTC string. An earlier
+  version of this within the same release cycle formatted it without
+  converting the timezone first, so it displayed the correct-looking
+  but actually-UTC clock value (e.g. `11:10` shown when it should have
+  read `13:10`) - fixed before release, but the corrected version
+  hasn't been re-confirmed live yet, see Testing notes.
 - Fixed (found during live testing): saving the Options form dismissed
   both persistent notifications even when neither sensor's data had
   actually changed, because notification cleanup lived in
   `async_unload_entry` - which also runs on the reload an options save
   triggers, not just on removing the integration. Moved to the
   `async_remove_entry` hook, which HA only calls on an actual delete.
-- `linked_entities_coordinator.py` now also resolves and stores
-  `referenced_by_details` (name/unique_id/domain per referencing
-  automation/script) alongside the existing plain `referenced_by`
-  entity_id list, which is unchanged - purely additive, needed for the
-  new "used by" notification links above.
+- Coordinator listeners that sync the persistent notifications are now
+  wrapped in a try/except with logging - previously an exception there
+  could in theory propagate out through `async_set_updated_data` into
+  whatever triggered the update instead of just failing the
+  notification. No live-confirmed instance of this actually happening
+  (an apparent "notification never showed up" turned out to be pure
+  timing, not a bug - a device's unavailable-timer kept resetting
+  across the repeated restarts during that testing session), but the
+  defensive fix and the debug logging it added were worth keeping.
+- Trimmed the README: dropped the Status, Scope, Architecture, and Data
+  model sections, which had grown stale/redundant with the more
+  detailed feature sections and this changelog.
 
 ## [0.5.0] - 2026-07-17
 

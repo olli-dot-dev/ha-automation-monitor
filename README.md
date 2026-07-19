@@ -496,28 +496,40 @@ including its ignore-list filtering, `decide_transition`,
 - ✅ `sensor.failed_automations` re-verified after the `unique_id`
   addition: live data confirmed to include a correct `unique_id` per
   entry (checked directly against the recorder DB)
+- ✅ Persistent-notification toggles, actually observed in the HA
+  frontend (bell icon), not just via the recorder DB: card appears once
+  its sensor has data and the toggle is on, updates in place across
+  repeated state changes without duplicating, and correctly stays
+  dismissed while the sensor has nothing to report (confirmed via debug
+  logging across several real create/dismiss cycles, see Persistent
+  notifications for the "apparent bug that was actually just timing"
+  story this uncovered) - also implicitly confirms the notification
+  survives an unrelated options save (see the `async_remove_entry` fix
+  above), since this was observed across several options changes made
+  during the same testing session
+- ✅ The device-page link's route pattern
+  (`/config/devices/device/<device_id>`) - confirmed correct by
+  comparing against a real, working URL copied directly from the
+  browser's own address bar
 
 Still pending:
 
 - ⬜ Options flow's new ignore-list field (`EntitySelector(multiple=True)`)
   renders and saves correctly, and an ignored entity is actually excluded
   after the resulting config-entry reload
-- ⬜ Persistent-notification toggles, as actually rendered in the HA
-  frontend (data correctness is confirmed via the recorder DB, see above,
-  but the notification card itself hasn't been eyeballed in a browser
-  yet): card appears when its sensor has data and the toggle is on,
-  updates in place rather than duplicating, clears itself once the
-  sensor goes back to empty, survives an unrelated options save (see
-  Persistent notifications for the bug this specifically checks for),
-  and disappears immediately when the toggle is switched off
-- ⬜ The new notification links, clicked for real (from inside the
-  notification itself, not just the URL pattern in isolation): a failed
-  automation's link opens its editor; an unavailable entity's device link
-  (`/config/devices/device/<id>`) opens the right device page; the
+- ⬜ The persistent-notification toggle actually dismissing its card the
+  moment it's switched off (the create/dismiss-on-empty cycle above is
+  confirmed; toggling off specifically wasn't exercised)
+- ⬜ The corrected local-time `unavailable since` timestamp, re-checked
+  live after the `.astimezone()` fix - not yet re-confirmed in an actual
+  notification since the fix was deployed
+- ⬜ The notification links, clicked for real *from inside the
+  notification itself* (not just the URL pattern confirmed in isolation,
+  see above): a failed automation's link opens its editor; the
   entity-settings fallback for device-less entities
   (`/config/entities/entity/<id>`) actually opens something sensible -
-  this one is still this project's best guess, not confirmed; and each
-  "used by" source link opens the right automation/script editor
+  still this project's best guess, not confirmed; and each "used by"
+  source link opens the right automation/script editor
 - ⬜ A real device transitioning to `unavailable` and back, including a
   rapid flap, correctly starting/cancelling the timer and never resetting
   on attribute-only noise
