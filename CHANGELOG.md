@@ -2,6 +2,36 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.6.1] - 2026-07-19
+
+- Each entity in the `sensor.linked_entities_unavailable` notification
+  now also shows its raw `entity_id` in copyable inline-code formatting,
+  and the notification ends with a link to the integration's own
+  settings page (`/config/integrations/integration/automation_monitor`)
+  plus a hint to copy an entity_id above and paste it in - live-verified
+  (settings link opens the right page). Makes adding a listed entity to
+  the ignore-list faster: no more navigating there manually or typing
+  the entity_id from memory, though the actual picking-and-saving step
+  in the options form still has to be done by hand - HA's options flow
+  has no way to pre-fill a field from a link (confirmed while scoping
+  this - no config-flow-discovery-style external-data mechanism exists
+  for options flows); a few bigger alternatives (a custom settings panel
+  that reads the entity from the URL and pre-selects it, an
+  `ignore_entity` service, mobile actionable notifications) were
+  considered and intentionally not built - decided not worth the added
+  complexity for this.
+- Also removed the README's "Testing notes", "Development", and "Open
+  questions" sections (same reasoning as the 0.6.0 README trim).
+- Documented in the README (Usage): a Home Assistant restart resets both
+  sensors, since neither persists across restarts by design - and for
+  `sensor.linked_entities_unavailable` specifically, this effectively
+  restarts an already-broken entity's unavailable-threshold countdown
+  too, since most integrations give their entities a fresh
+  `last_changed` timestamp on HA startup. Learned the hard way during
+  this session's live testing (repeated restarts kept resetting the test
+  entities' timers, which looked like a bug before turning out to be
+  expected HA behaviour).
+
 ## [0.6.0] - 2026-07-19
 
 - Added an entity ignore-list to the Options flow: entities added there

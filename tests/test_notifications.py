@@ -112,8 +112,8 @@ def test_build_linked_entities_message_single_entry_no_sources():
             "referenced_by_details": [],
         }
     }
-    assert build_linked_entities_message(data) == (
-        f"- [**Garden Light**](/config/entities/entity/light.x) "
+    assert build_linked_entities_message(data).startswith(
+        f"- [**Garden Light**](/config/entities/entity/light.x) (`light.x`) "
         f"unavailable since {expected_ts}"
     )
 
@@ -250,3 +250,36 @@ def test_build_linked_entities_message_source_without_unique_id_is_plain_text():
     message = build_linked_entities_message(data)
     assert "used by A" in message
     assert "(/config/automation/edit/" not in message
+
+
+def test_build_linked_entities_message_includes_settings_link_when_nonempty():
+    data = {
+        "light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}
+    }
+    message = build_linked_entities_message(data)
+    assert "[Automation Monitor settings](/config/integrations/integration/automation_monitor)" in message
+
+
+def test_build_linked_entities_message_empty_data_has_no_settings_link():
+    # Empty data must still produce an empty string overall (caller relies
+    # on this to decide whether to dismiss the notification) - the
+    # settings link must not sneak in on its own.
+    assert build_linked_entities_message({}) == ""
+
+
+def test_build_linked_entities_message_includes_copy_hint_when_nonempty():
+    data = {
+        "light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}
+    }
+    message = build_linked_entities_message(data)
+    assert "copy its entity_id above" in message
+
+
+def test_build_linked_entities_message_shows_entity_id_as_inline_code():
+    data = {
+        "media_player.x": {
+            "entity_id": "media_player.x", "name": "X", "unavailable_since": "t1",
+        }
+    }
+    message = build_linked_entities_message(data)
+    assert "(`media_player.x`)" in message

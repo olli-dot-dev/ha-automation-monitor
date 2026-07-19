@@ -27,6 +27,11 @@ from typing import Any
 # link instead of falling back to plain text.
 _EDITOR_PATH_BY_DOMAIN = {"automation": "automation", "script": "script"}
 
+# Hardcoded rather than imported from .const - this module is loaded
+# directly by file path in tests (see module docstring), which doesn't
+# support relative imports; DOMAIN is effectively fixed anyway.
+_INTEGRATION_SETTINGS_URL = "/config/integrations/integration/automation_monitor"
+
 
 def _format_timestamp(iso_string: str) -> str:
     """Human-readable "YYYY-MM-DD HH:MM" in the *local* timezone, instead
@@ -115,16 +120,35 @@ def build_failed_automations_message(data: dict[str, dict[str, Any]]) -> str:
 
 def build_linked_entities_message(data: dict[str, dict[str, Any]]) -> str:
     """One line per currently-unavailable linked entity: a link to its
-    device (or its own settings, if it has no device), when it went
-    unavailable, and - if known - which automation(s)/script(s) actually
-    reference it, each linking straight to its editor. Empty string if
-    `data` is empty - same convention as build_failed_automations_message."""
+    device (or its own settings, if it has no device), its raw entity_id
+    in copyable inline-code formatting (see settings-link hint below),
+    when it went unavailable, and - if known - which automation(s)/
+    script(s) actually reference it, each linking straight to its
+    editor. Ends with a link to the integration's own settings (to add
+    one of the above to the ignore-list - see const.py
+    CONF_IGNORED_ENTITIES) if there's anything to report; HA's options
+    flow can't be pre-filled from a link (no such mechanism exists for a
+    custom integration's options schema), so the hint tells the reader
+    to copy the entity_id shown above and paste it in themselves once
+    there. Empty string if `data` is empty - same convention as
+    build_failed_automations_message."""
     lines = []
     for info in sorted(data.values(), key=lambda info: info["name"]):
         link = _device_or_entity_link(info["entity_id"], info["name"], info.get("device_id"))
-        line = f"- {link} unavailable since {_format_timestamp(info['unavailable_since'])}"
+        line = (
+            f"- {link} (`{info['entity_id']}`) "
+            f"unavailable since {_format_timestamp(info['unavailable_since'])}"
+        )
         sources = info.get("referenced_by_details") or []
         if sources:
             line += " · used by " + ", ".join(_source_link(s) for s in sources)
         lines.append(line)
+
+    if not lines:
+        return ""
+
+    lines.append(
+        f"\nTo ignore an entity: copy its entity_id above, then paste it in "
+        f"under [Automation Monitor settings]({_INTEGRATION_SETTINGS_URL})"
+    )
     return "\n".join(lines)

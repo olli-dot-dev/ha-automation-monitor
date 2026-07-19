@@ -78,8 +78,8 @@ automation.
 
 This matters because it's easy to pick a misleading test case: calling a
 genuinely nonexistent service (`light.this_service_does_not_exist`, one
-of the four scenarios validated during development, see Testing notes)
-gets caught by both HA's native Repairs *and* this integration. That
+of the scenarios validated during development) gets caught by both HA's
+native Repairs *and* this integration. That
 overlap is real but narrow - it's the one failure mode in this project's
 own test suite that HA already catches on its own, without needing this
 integration at all.
@@ -91,7 +91,7 @@ runtime:
 - A template that's syntactically valid but hits `None` or a missing key
   at runtime, depending on live state
 - A deliberate `stop: ... error: true` - not a config problem at all, so
-  Repairs never sees it (verified live, see Testing notes)
+  Repairs never sees it (verified live)
 - A cloud-integration service call that fails due to that service's own
   backend/network issues, *provided* the integration actually raises on
   failure instead of swallowing it
@@ -163,6 +163,16 @@ manually day to day:
 - Call `automation_monitor.rebuild_linked_entities` right after editing a
   script's content, to pick up the change immediately instead of waiting
   for the periodic safety-net rebuild (see Actions)
+- **A Home Assistant restart resets both sensors** - no persistence
+  across restarts, by design. `sensor.failed_automations` starts empty
+  since it's purely event-driven (only reacts to a fresh
+  `automation_triggered` event, not to whatever was already broken
+  before the restart). `sensor.linked_entities_unavailable` re-derives
+  its state from scratch too, and in practice most entities get a fresh
+  `last_changed` timestamp from their own integration when HA
+  reinitializes at startup - so even a device that's been broken for
+  days needs to wait out the full threshold *again* after a restart
+  before it's flagged (and notified about) once more
 
 ## Failure classification
 
@@ -186,8 +196,9 @@ Implemented in `custom_components/automation_monitor/classification.py`,
 covered by `tests/test_classification.py`. This is the most
 trust-critical part of the integration - false positives make users
 ignore the sensor. Validated live against a HA 2026.7.1 test instance
-with all four cases from the Testing notes below - all four classify
-correctly.
+across all four classification scenarios (error, mid-sequence condition
+action, `stop: ... error: true`, `mode: single` re-trigger) - all four
+classify correctly.
 
 One more live-testing finding: a `mode: single` automation re-triggered
 while already running is often rejected by HA *before*
@@ -312,13 +323,13 @@ place rather than piling up a new card every time something changes:
     (`/config/devices/device/<device_id>`) - the route pattern itself
     is confirmed correct (the user copied a real, working URL in exactly
     this shape straight from their own browser), though clicking the
-    link *from inside the notification* hasn't been done yet - see
-    Testing notes. Entities with no device (helpers, template entities,
-    ...) fall back to the entity settings page
-    (`/config/entities/entity/<entity_id>`) instead - **that fallback
-    route is this project's best guess, not independently verified live**.
-    Either way, if known, the entity link is followed by
-    "used by" links to every automation/script that references it
+    link *from inside the notification* hasn't been done yet. Entities
+    with no device (helpers, template entities, ...) fall back to the
+    entity settings page (`/config/entities/entity/<entity_id>`) instead
+    - **that fallback route is this project's best guess, not
+    independently verified live**. Either way, if known, the entity link
+    is followed by "used by" links to every automation/script that
+    references it
     (`/config/automation/edit/...` or `/config/script/edit/...`, each
     falling back to plain unlinked text if its own unique_id can't be
     resolved). The `unavailable since` timestamp is formatted as
@@ -331,6 +342,18 @@ place rather than piling up a new card every time something changes:
     imports and can't read `hass.config.time_zone` directly) - correct
     as long as the machine's OS timezone matches HA's configured one,
     which holds for a typical single-purpose HAOS install.
+- Each entity in the `sensor.linked_entities_unavailable` notification
+  also shows its raw `entity_id` in copyable inline-code formatting
+  (e.g. `` `light.hallway` ``) right next to its name, and the
+  notification ends with a link to the integration's own settings
+  (`/config/integrations/integration/automation_monitor`) plus a hint to
+  copy an entity_id above and paste it in - for adding one of the listed
+  entities to the ignore-list (see Linked entity unavailability
+  detection). This only saves the navigation and the typing, not the
+  picking-the-entity step itself - HA's options flow has no mechanism to
+  pre-fill a field from a link, so the entity still has to be selected
+  (pasting the entity_id into the picker's search box works) and saved
+  manually once there. Both are absent when the notification is empty.
 - Once the sensor goes back to empty (nothing failed / nothing
   unavailable), the notification is automatically dismissed
 - Turning a toggle off dismisses that sensor's notification immediately,
@@ -350,7 +373,7 @@ Message text is built by pure, unit-tested functions in `notifications.py`
 `persistent_notification.async_create`/`async_dismiss`. Actual dismissal
 on integration removal lives in `async_remove_entry`, which HA only calls
 on a genuine delete - not `async_unload_entry`, which also runs on every
-reload (see the point above). Not yet verified live, see Testing notes.
+reload (see the point above) - live-verified.
 
 This is meant for a quick, always-on-if-you-want-it status card, not a
 push alert - for that, see Recommended notification automation below,
@@ -437,119 +460,6 @@ Replace `notify.notify` with a specific notify target (e.g.
 `notify.mobile_app_your_phone`). `mode: queued` so that failures arriving
 in quick succession each still get their own notification instead of
 cancelling one another.
-
-## Open questions
-
-- ~~Delay between `automation_triggered` and trace fetch: fixed timeout or
-  poll until the trace reports `running: false`?~~ Resolved: polling
-  every 1s up to 60s, see `_async_wait_for_finished_trace` in
-  `coordinator.py`. A first attempt at 5s total was too short - live
-  testing caught an 8s `delay:` action never getting classified at all.
-  Automations that run longer than 60s (e.g. an unbounded
-  `wait_for_trigger`) still won't be classified - accepted as a known
-  MVP limit rather than polling indefinitely.
-- Behaviour on HA restart: keep failures from the previous session
-  (needs persistence) or accept a cold start (empty list after restart)?
-  **Recommendation: cold start for MVP**, persistence as a later step.
-- ~~Automations without a trigger (manual/script-invoked only) - should
-  go through the same event, verify explicitly in testing.~~ Resolved:
-  yes, all four live test automations below used `triggers: []` and
-  were triggered manually via the UI "Run" action - the event fires the
-  same way.
-
-## Testing notes
-
-All four verified live against a real HA 2026.7.1 instance:
-
-- ✅ Automation with a deliberate error (e.g. service call on a
-  non-existent entity) to verify classification
-- ✅ Automation with a *mid-sequence* `condition:` action that fails -
-  must **not** appear in the list (most important negative test case; a
-  top-level automation `condition:` never even reaches the coordinator,
-  see Data source)
-- ✅ Automation with `stop: ... error: true` - **should** appear in the
-  list; this is the ambiguous `aborted` case, worth extra scrutiny
-- ✅ `mode: single` automation re-triggered while still running - must
-  **not** count as a failure (in practice HA rejects the second trigger
-  before `automation_triggered` even fires, see Failure classification)
-
-**Linked entity unavailability detection** - unit tested (`build_reference_map`,
-including its ignore-list filtering, `decide_transition`,
-`time_remaining_until_flag`, all pure). Live-verified against a real HA
-2026.7.1 instance:
-
-- ✅ Deploys and loads without error; `sensor.linked_entities_unavailable`
-  shows the expected empty baseline (`state: 0`, `entities: []`) when
-  nothing tracked is unavailable
-- ✅ Options flow opens with the threshold field pre-filled and saves
-  correctly (confirms `OptionsFlow.config_entry` is available without
-  manually assigning it in `__init__`, see `config_flow.py`)
-- ✅ `entities_in_automation`/`areas_in_automation` device/area resolution
-  against a real automation using `target: area_id: kuche` - correctly
-  resolved to the actual entities in that area (a media_player, several
-  switches/numbers), and - just as importantly - correctly did **not**
-  pick up an unrelated `unavailable` entity (`media_player.65_the_frame`)
-  that turned out to sit in the automation's `action:` field (a plain
-  service-name string) rather than an actual `target:`/`entity_id:`
-  reference; confirmed by inspecting the recorder DB directly rather than
-  relying on the sensor being right
-- ✅ `sensor.failed_automations` re-verified after the `unique_id`
-  addition: live data confirmed to include a correct `unique_id` per
-  entry (checked directly against the recorder DB)
-- ✅ Persistent-notification toggles, actually observed in the HA
-  frontend (bell icon), not just via the recorder DB: card appears once
-  its sensor has data and the toggle is on, updates in place across
-  repeated state changes without duplicating, and correctly stays
-  dismissed while the sensor has nothing to report (confirmed via debug
-  logging across several real create/dismiss cycles, see Persistent
-  notifications for the "apparent bug that was actually just timing"
-  story this uncovered) - also implicitly confirms the notification
-  survives an unrelated options save (see the `async_remove_entry` fix
-  above), since this was observed across several options changes made
-  during the same testing session
-- ✅ The device-page link's route pattern
-  (`/config/devices/device/<device_id>`) - confirmed correct by
-  comparing against a real, working URL copied directly from the
-  browser's own address bar
-
-Still pending:
-
-- ⬜ Options flow's new ignore-list field (`EntitySelector(multiple=True)`)
-  renders and saves correctly, and an ignored entity is actually excluded
-  after the resulting config-entry reload
-- ⬜ The persistent-notification toggle actually dismissing its card the
-  moment it's switched off (the create/dismiss-on-empty cycle above is
-  confirmed; toggling off specifically wasn't exercised)
-- ⬜ The corrected local-time `unavailable since` timestamp, re-checked
-  live after the `.astimezone()` fix - not yet re-confirmed in an actual
-  notification since the fix was deployed
-- ⬜ The notification links, clicked for real *from inside the
-  notification itself* (not just the URL pattern confirmed in isolation,
-  see above): a failed automation's link opens its editor; the
-  entity-settings fallback for device-less entities
-  (`/config/entities/entity/<id>`) actually opens something sensible -
-  still this project's best guess, not confirmed; and each "used by"
-  source link opens the right automation/script editor
-- ⬜ A real device transitioning to `unavailable` and back, including a
-  rapid flap, correctly starting/cancelling the timer and never resetting
-  on attribute-only noise
-- ⬜ Whether 2026.7.1 has grown a `script_reloaded`-equivalent event (if
-  so, the periodic safety-net rebuild could be dropped)
-
-## Development
-
-```bash
-pip install -r requirements_test.txt
-pytest
-```
-
-Unit tests cover `classification.py` and `linked_entities.py` only - both
-are deliberately dependency-free (no `homeassistant` import), loaded
-directly by file path in `tests/` so they can run without installing HA.
-Everything that touches HA itself (coordinators, config/options flow,
-the trace API, entity/device registries) has to be verified live against
-a real Home Assistant instance instead - see Testing notes for what's
-been checked and what's still pending.
 
 ## Contributing
 
