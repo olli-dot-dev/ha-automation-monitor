@@ -39,13 +39,18 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_EXCLUDE_OFF_AUTOMATIONS,
+    CONF_EXCLUDED_LABELS,
     CONF_IGNORED_ENTITIES,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
+    DEFAULT_EXCLUDE_OFF_AUTOMATIONS,
+    DEFAULT_EXCLUDED_LABELS,
     DEFAULT_IGNORED_ENTITIES,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
     DOMAIN,
     LINKED_ENTITIES_REBUILD_INTERVAL_MINUTES,
 )
+from .labels import entity_has_excluded_label
 from .linked_entities import (
     UNAVAILABLE_LIKE_STATES,
     build_reference_map,
@@ -133,12 +138,32 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
     return referenced
 
 
-def async_collect_source_entities(hass: HomeAssistant) -> dict[str, set[str]]:
+def async_collect_source_entities(
+    hass: HomeAssistant,
+    *,
+    exclude_off_automations: bool = False,
+    excluded_labels: set[str] | None = None,
+) -> dict[str, set[str]]:
     """Return {automation/script entity_id: {referenced entity_ids}} for
-    every currently loaded automation and script."""
+    every currently loaded automation and script.
+
+    `exclude_off_automations` only ever skips automations, never scripts -
+    see CONF_EXCLUDE_OFF_AUTOMATIONS in const.py for why a script's "off"
+    state can't be treated the same way (idle, not disabled). A
+    label-excluded automation/script (see CONF_EXCLUDED_LABELS) is
+    skipped as a source entirely - its referenced entities simply aren't
+    added to the map via it (still tracked if another, non-excluded
+    automation/script also references them)."""
+    excluded_labels = excluded_labels or set()
     source: dict[str, set[str]] = {}
     for domain in _TRACKED_DOMAINS:
         for entity_id in hass.states.async_entity_ids(domain):
+            if exclude_off_automations and domain == "automation":
+                state = hass.states.get(entity_id)
+                if state is not None and state.state == "off":
+                    continue
+            if entity_has_excluded_label(hass, entity_id, excluded_labels):
+                continue
             try:
                 source[entity_id] = _referenced_entities_for(hass, domain, entity_id)
             except Exception:  # noqa: BLE001 - one bad entry shouldn't break the whole map
@@ -152,11 +177,37 @@ def async_collect_source_entities(hass: HomeAssistant) -> dict[str, set[str]]:
 
 
 def async_build_reference_map(
-    hass: HomeAssistant, ignored: set[str] | None = None
+    hass: HomeAssistant,
+    ignored: set[str] | None = None,
+    *,
+    exclude_off_automations: bool = False,
+    excluded_labels: set[str] | None = None,
 ) -> dict[str, list[str]]:
     """HA-touching half of the reference-map build: collect + invert in
-    one call. See linked_entities.build_reference_map for the pure half."""
-    return build_reference_map(async_collect_source_entities(hass), ignored or ())
+    one call. See linked_entities.build_reference_map for the pure half.
+
+    A label-excluded *referenced* entity/device (as opposed to a
+    label-excluded automation/script source, handled inside
+    async_collect_source_entities) is folded into `ignored` here rather
+    than filtered separately - reuses the pure build_reference_map's
+    existing ignored-entity handling (and, via that, async_rebuild's
+    existing "dropped from map -> unflag if flagged" cleanup) instead of
+    duplicating it for a second exclusion mechanism."""
+    excluded_labels = excluded_labels or set()
+    source = async_collect_source_entities(
+        hass,
+        exclude_off_automations=exclude_off_automations,
+        excluded_labels=excluded_labels,
+    )
+    ignored = set(ignored or ())
+    if excluded_labels:
+        referenced_ids = {rid for ids in source.values() for rid in ids}
+        ignored |= {
+            rid
+            for rid in referenced_ids
+            if entity_has_excluded_label(hass, rid, excluded_labels)
+        }
+    return build_reference_map(source, ignored)
 
 
 class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -172,6 +223,15 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
         self._reference_map: dict[str, list[str]] = {}
         self._pending_timers: dict[str, CALLBACK_TYPE] = {}
         self._state_unsub: CALLBACK_TYPE | None = None
+        # Separate from _state_unsub above (which tracks *referenced*
+        # entities for unavailability) - this one watches automation
+        # entities themselves for on/off transitions, only subscribed
+        # while _exclude_off_automations is on, see async_rebuild. Without
+        # it, toggling an automation off/on wouldn't be picked up until
+        # the next periodic rebuild (up to 20 minutes) - none of the
+        # other rebuild triggers (automation_reloaded, entity registry
+        # updates) fire for a plain state change.
+        self._automation_toggle_unsub: CALLBACK_TYPE | None = None
         self._unsubs: list[CALLBACK_TYPE] = []
 
     @property
@@ -184,6 +244,18 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
     def _ignored_entities(self) -> set[str]:
         return set(
             self._entry.options.get(CONF_IGNORED_ENTITIES, DEFAULT_IGNORED_ENTITIES)
+        )
+
+    @property
+    def _exclude_off_automations(self) -> bool:
+        return self._entry.options.get(
+            CONF_EXCLUDE_OFF_AUTOMATIONS, DEFAULT_EXCLUDE_OFF_AUTOMATIONS
+        )
+
+    @property
+    def _excluded_labels(self) -> set[str]:
+        return set(
+            self._entry.options.get(CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS)
         )
 
     @callback
@@ -217,6 +289,9 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
         if self._state_unsub is not None:
             self._state_unsub()
             self._state_unsub = None
+        if self._automation_toggle_unsub is not None:
+            self._automation_toggle_unsub()
+            self._automation_toggle_unsub = None
         for cancel in self._pending_timers.values():
             cancel()
         self._pending_timers.clear()
@@ -225,10 +300,31 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
         """Rebuild the reference map, resubscribe to state changes for the
         new tracked set, and reconcile currently-tracked/flagged entities
         against what changed."""
-        new_map = async_build_reference_map(self.hass, self._ignored_entities)
+        exclude_off_automations = self._exclude_off_automations
+        new_map = async_build_reference_map(
+            self.hass,
+            self._ignored_entities,
+            exclude_off_automations=exclude_off_automations,
+            excluded_labels=self._excluded_labels,
+        )
         old_tracked = set(self._reference_map)
         new_tracked = set(new_map)
         self._reference_map = new_map
+
+        # Re-subscribe to automation on/off transitions so toggling one
+        # doesn't have to wait for the next periodic rebuild to take
+        # effect - only while the option is actually on, and against the
+        # *current* set of automation entities (covers newly-added ones
+        # on the next rebuild too).
+        if self._automation_toggle_unsub is not None:
+            self._automation_toggle_unsub()
+            self._automation_toggle_unsub = None
+        if exclude_off_automations:
+            automation_ids = list(self.hass.states.async_entity_ids("automation"))
+            if automation_ids:
+                self._automation_toggle_unsub = async_track_state_change_event(
+                    self.hass, automation_ids, self._handle_automation_toggle
+                )
 
         # Dropped from the map (their automation/script was deleted or no
         # longer references them): stop tracking, unflag if flagged.
@@ -272,6 +368,16 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
     def _handle_reload_event(self, event: Event) -> None:
         self.hass.async_create_task(self.async_rebuild())
 
+    # No dedicated listener for label changes (added/removed via the
+    # label-management dialog on an entity or device) - same gap as
+    # script edits (see EVENT_AUTOMATION_RELOADED above): picked up by
+    # the next periodic rebuild (LINKED_ENTITIES_REBUILD_INTERVAL_MINUTES,
+    # up to 20 min) or the rebuild_linked_entities service, not
+    # immediately. A dedicated device/entity-registry listener would have
+    # to fire on every registry update across all of hass to catch every
+    # possible label change, not just automation/script ones (see
+    # _handle_registry_updated below) - too broad for the benefit.
+
     @callback
     def _handle_registry_updated(self, event: Event) -> None:
         entity_id = event.data.get("entity_id", "")
@@ -284,6 +390,22 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
 
     async def _handle_started(self, hass: HomeAssistant) -> None:
         await self.async_rebuild()
+
+    @callback
+    def _handle_automation_toggle(self, event: Event) -> None:
+        """An automation we're subscribed to (see async_rebuild) changed
+        state - only relevant while exclude_off_automations is on. Full
+        rebuild rather than a targeted update: a single automation
+        flipping off/on can add or remove several referenced entities at
+        once (all its target entities), same complexity as a config
+        change, so there's no simpler partial update worth doing here."""
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        old = old_state.state if old_state else None
+        new = new_state.state if new_state else None
+        if old == new:
+            return  # attribute-only noise, not an actual on/off transition
+        self.hass.async_create_task(self.async_rebuild())
 
     @callback
     def _handle_state_change(self, event: Event) -> None:

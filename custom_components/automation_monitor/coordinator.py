@@ -10,12 +10,14 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .classification import is_execution_failure
-from .const import DOMAIN, EVENT_AUTOMATION_TRIGGERED
+from .const import CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS, DOMAIN, EVENT_AUTOMATION_TRIGGERED
+from .labels import entity_has_excluded_label
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,10 +40,17 @@ TRACE_POLL_MAX_ATTEMPTS = 60
 class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Holds entity_id -> failure-info for all currently failed automations."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.data: dict[str, dict[str, Any]] = {}
+        self._entry = entry
         self._remove_listener: Any = None
+
+    @property
+    def _excluded_labels(self) -> set[str]:
+        return set(
+            self._entry.options.get(CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS)
+        )
 
     @callback
     def async_setup(self) -> None:
@@ -59,6 +68,13 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
     def _handle_automation_triggered(self, event: Event) -> None:
         entity_id = event.data.get("entity_id")
         if entity_id is None:
+            return
+        # A labeled automation is opted out of monitoring entirely (see
+        # CONF_EXCLUDED_LABELS in const.py) - checked fresh on every
+        # trigger rather than cached, so a label added/removed via the
+        # dialog takes effect on the automation's very next run without
+        # needing a reload.
+        if entity_has_excluded_label(self.hass, entity_id, self._excluded_labels):
             return
         self.hass.async_create_task(self._async_process_trigger(entity_id))
 

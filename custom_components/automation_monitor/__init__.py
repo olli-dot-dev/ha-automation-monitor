@@ -27,13 +27,34 @@ from .const import (
 )
 from .coordinator import AutomationMonitorCoordinator
 from .linked_entities_coordinator import LinkedEntitiesCoordinator
-from .notifications import build_failed_automations_message, build_linked_entities_message
+from .notifications import (
+    SUPPORTED_LANGUAGES,
+    build_failed_automations_message,
+    build_linked_entities_message,
+    failed_automations_title,
+    linked_entities_title,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 RESET_SERVICE_SCHEMA = vol.Schema({
     vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
 })
+
+
+def _notification_language(hass: HomeAssistant) -> str:
+    """Resolve `hass.config.language` (HA's own system-language setting
+    under Settings -> System -> General; normally a plain 2-letter code
+    like "de", but split on "-"/"_" defensively in case it's ever a full
+    locale like "de-DE") down to one of notifications.SUPPORTED_LANGUAGES,
+    falling back to English for anything not (yet) translated - see
+    notifications.py for why this can't just be handled by HA's own
+    strings.json/translations mechanism."""
+    language = (hass.config.language or "en").lower()
+    short = language.replace("_", "-").split("-")[0]
+    if short in SUPPORTED_LANGUAGES:
+        return short
+    return "en"
 
 
 @dataclass
@@ -47,7 +68,7 @@ class AutomationMonitorRuntimeData:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    failures_coordinator = AutomationMonitorCoordinator(hass)
+    failures_coordinator = AutomationMonitorCoordinator(hass, entry)
     failures_coordinator.async_setup()
 
     linked_entities_coordinator = LinkedEntitiesCoordinator(hass, entry)
@@ -70,24 +91,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # notification_id is safe (updates in place, no duplicates).
     @callback
     def _update_failed_automations_notification() -> None:
+        lang = _notification_language(hass)
         _async_sync_notification(
             hass,
             enabled=entry.options.get(CONF_NOTIFY_FAILED_AUTOMATIONS, DEFAULT_NOTIFY),
             notification_id=NOTIFICATION_ID_FAILED_AUTOMATIONS,
-            title="Automation Monitor: failed automations",
-            message=build_failed_automations_message(failures_coordinator.data),
+            title=failed_automations_title(lang),
+            message=build_failed_automations_message(failures_coordinator.data, lang),
         )
 
     @callback
     def _update_linked_entities_notification() -> None:
+        lang = _notification_language(hass)
         _async_sync_notification(
             hass,
             enabled=entry.options.get(
                 CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE, DEFAULT_NOTIFY
             ),
             notification_id=NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE,
-            title="Automation Monitor: unavailable linked entities",
-            message=build_linked_entities_message(linked_entities_coordinator.data),
+            title=linked_entities_title(lang),
+            message=build_linked_entities_message(linked_entities_coordinator.data, lang),
         )
 
     entry.async_on_unload(

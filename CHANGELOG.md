@@ -2,6 +2,64 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.7.0] - 2026-07-25
+
+- Added a "Skip automations that are turned off" toggle to the Options
+  flow (off by default). Requested by a real user with automations
+  intentionally turned off seasonally (winter-only solar/battery
+  charge-limit automations), whose referenced entities were still being
+  tracked and flagged by `sensor.linked_entities_unavailable` despite the
+  automation being unable to run at all - the reference-map build walks
+  each automation's *config*, which is unaffected by its current on/off
+  state. Only ever applies to automations, never scripts (a script's
+  "off" state means idle, not disabled - it has no enable/disable concept
+  to filter by). Toggling an automation on/off is picked up immediately
+  via a dedicated state-change subscription (only active while this
+  option is on), not just on the next periodic rebuild - none of the
+  existing rebuild triggers (`automation_reloaded`, entity registry
+  updates) fire for a plain on/off toggle. Not yet verified live against
+  a running HA instance.
+- Added German (`de`) translation, requested by a user who found the
+  (English-only) persistent notifications hard to follow. Automatically
+  follows HA's own system language (`hass.config.language`), falling
+  back to English otherwise - nothing to configure. Two separate
+  mechanisms: entity names and the Options dialog now go through HA's
+  standard `strings.json`/`translations/<lang>.json` system (previously
+  English-only there too - `translations/de.json` added, entity names
+  switched from hardcoded `_attr_name` to translatable
+  `_attr_translation_key`); persistent notification text is translated
+  by hand via a new small string table in `notifications.py`
+  (`build_failed_automations_message`/`build_linked_entities_message`
+  gained an optional `lang` parameter), since that text is built at
+  runtime from live data and HA's translation system doesn't cover that
+  at all. See README "Language" for how to add another language. Not
+  yet verified live with `hass.config.language` actually set to `de`.
+- Added French (`fr`) and Spanish (`es`) translations, same mechanism as
+  German above: `translations/fr.json`/`translations/es.json` for entity
+  names and the Options dialog, plus `fr`/`es` entries in
+  `notifications.py`'s `_STRINGS` table for persistent notification text.
+  Not yet verified live with `hass.config.language` actually set to `fr`
+  or `es`.
+- Added an "Excluded labels" field (multi-select `LabelSelector`) to the
+  Options flow, using HA's own label feature instead of a hand-picked
+  entity_id list (new `labels.py`). An automation carrying one of these
+  labels is skipped entirely by both sensors: never flagged by the
+  failed-automations sensor even if it errors (checked fresh on every
+  trigger in `coordinator.py`), and skipped as a reference-map source in
+  `linked_entities_coordinator.py` (same treatment as the existing "skip
+  turned-off automations" toggle). An entity or device carrying one of
+  these labels is excluded from the linked-entities-unavailable check the
+  same way an ignored entity already is - a device-level label excludes
+  all of that device's entities. Label changes are picked up on the next
+  periodic rebuild or `rebuild_linked_entities` service call for the
+  linked-entities sensor (same lag as a script content edit), and
+  immediately (next trigger) for the failed-automations sensor.
+  Live-verified: a labeled automation errored and was correctly never
+  flagged; a labeled *device* (label applied to the device, not the
+  entity) stayed genuinely unavailable but correctly dropped out of
+  `sensor.linked_entities_unavailable` after a restart, confirming both
+  the exclusion itself and the device-to-entity label inheritance.
+
 ## [0.6.1] - 2026-07-19
 
 - Each entity in the `sensor.linked_entities_unavailable` notification

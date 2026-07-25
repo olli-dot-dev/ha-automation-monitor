@@ -39,6 +39,41 @@ DEFAULT_NOTIFY = False
 NOTIFICATION_ID_FAILED_AUTOMATIONS = f"{DOMAIN}_failed_automations"
 NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE = f"{DOMAIN}_linked_entities_unavailable"
 
+# Options flow: skip automations that are currently turned off (state
+# "off" - their own on/off toggle, e.g. Settings -> Automations, or
+# automation.turn_off) when building the linked-entities reference map.
+# Off by default (preserves existing behaviour): a turned-off automation's
+# referenced entities are still tracked/flagged unless a user opts into
+# this. Requested by a real user with automations intentionally disabled
+# seasonally (winter-only battery/solar charge-limit automations) whose
+# referenced entities were getting flagged despite posing no actual risk
+# while the automation can't run at all.
+#
+# Deliberately does NOT apply to scripts: a script entity's "off" state
+# means "not currently running" (idle), not "disabled" - scripts have no
+# enable/disable concept at all, unlike automations. Filtering scripts by
+# state would incorrectly exclude nearly every script nearly all the time.
+CONF_EXCLUDE_OFF_AUTOMATIONS = "exclude_off_automations"
+DEFAULT_EXCLUDE_OFF_AUTOMATIONS = False
+
+# Options flow: HA's own labels (Settings -> Areas, labels & zones ->
+# Labels) whose entities/devices should be excluded from monitoring
+# entirely - picked via a LabelSelector rather than typed by hand, so a
+# user just labels whatever they want excluded instead of maintaining an
+# entity_id list here too. Two effects, mirroring "Automationen UND
+# Entitaeten, Geraete ausschliessen" (as requested):
+# - An automation carrying one of these labels is skipped entirely by the
+#   failed-automations sensor (never flagged even if it errors), and
+#   skipped as a linked-entities reference-map source (same treatment as
+#   CONF_EXCLUDE_OFF_AUTOMATIONS above).
+# - An entity or device carrying one of these labels is excluded from the
+#   linked-entities-unavailable check entirely, same as
+#   CONF_IGNORED_ENTITIES but driven by a label instead of a hand-picked
+#   entity_id - a label on a device excludes all of that device's
+#   entities, not just ones labeled individually. See labels.py.
+CONF_EXCLUDED_LABELS = "excluded_labels"
+DEFAULT_EXCLUDED_LABELS: list[str] = []
+
 # How often to rebuild the automation/script -> referenced-entity map as a
 # safety net, since there is no HA event for "a script's content changed"
 # (confirmed absent from the installed HA source - automation has

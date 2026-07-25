@@ -16,10 +16,14 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_EXCLUDE_OFF_AUTOMATIONS,
+    CONF_EXCLUDED_LABELS,
     CONF_IGNORED_ENTITIES,
     CONF_NOTIFY_FAILED_AUTOMATIONS,
     CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
+    DEFAULT_EXCLUDE_OFF_AUTOMATIONS,
+    DEFAULT_EXCLUDED_LABELS,
     DEFAULT_IGNORED_ENTITIES,
     DEFAULT_NOTIFY,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
@@ -50,9 +54,13 @@ class AutomationMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
     """Fields: how many minutes a linked entity must stay continuously
     unavailable before it's flagged, which entities to exclude from that
-    check entirely, and a persistent-notification toggle per sensor
-    (failed automations / unavailable linked entities - independent of
-    each other, see notifications.py).
+    check entirely, whether to skip currently-off automations when
+    building the reference map (see CONF_EXCLUDE_OFF_AUTOMATIONS in
+    const.py), which labels exclude the automations/entities/devices that
+    carry them from monitoring entirely (see CONF_EXCLUDED_LABELS in
+    const.py / labels.py), and a persistent-notification toggle per
+    sensor (failed automations / unavailable linked entities -
+    independent of each other, see notifications.py).
 
     Deliberately does NOT set self.config_entry in an __init__ override -
     relies on the base class's own `config_entry` property, which current
@@ -80,6 +88,12 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
         current_notify_linked = self.config_entry.options.get(
             CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE, DEFAULT_NOTIFY
         )
+        current_exclude_off = self.config_entry.options.get(
+            CONF_EXCLUDE_OFF_AUTOMATIONS, DEFAULT_EXCLUDE_OFF_AUTOMATIONS
+        )
+        current_excluded_labels = self.config_entry.options.get(
+            CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS
+        )
         schema = vol.Schema(
             {
                 vol.Required(
@@ -90,6 +104,12 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(multiple=True)
                 ),
+                vol.Optional(
+                    CONF_EXCLUDED_LABELS, default=current_excluded_labels
+                ): selector.LabelSelector(selector.LabelSelectorConfig(multiple=True)),
+                vol.Required(
+                    CONF_EXCLUDE_OFF_AUTOMATIONS, default=current_exclude_off
+                ): selector.BooleanSelector(),
                 vol.Required(
                     CONF_NOTIFY_FAILED_AUTOMATIONS, default=current_notify_failed
                 ): selector.BooleanSelector(),

@@ -283,21 +283,58 @@ the list unflags it on the next rebuild (options changes reload the
 config entry, which rebuilds from scratch - see `_async_options_updated`
 in `__init__.py`).
 
+**Automations that are turned off can be skipped entirely** via the
+"Skip automations that are turned off" toggle in the same Options dialog
+(off by default, to preserve prior behaviour). Off by default: a
+turned-off automation's config is still fully parseable, so its
+referenced entities are tracked and can be flagged just like any other,
+even though the automation can't actually run right now and so poses no
+practical risk while it stays off - useful if you disable automations
+seasonally (e.g. winter-only solar/battery charge-limit automations) and
+don't want their entities' unavailability nagging you while unused. Only
+ever applies to automations, never scripts - a script entity's own "off"
+state means "not currently running" (idle), not "disabled"; scripts have
+no enable/disable concept at all, so filtering them the same way would
+incorrectly exclude nearly every script nearly all the time. Toggling an
+automation on/off is picked up immediately (a dedicated state-change
+subscription, only active while this option is on - see
+`_handle_automation_toggle` in `linked_entities_coordinator.py`), not
+just on the next periodic rebuild.
+
+**Labels can exclude automations, entities and devices** via an
+"Excluded labels" field (multi-select) in the same Options dialog, using
+HA's own label feature (Settings → Areas, labels & zones → Labels) rather
+than a hand-picked entity_id list: label whatever should be left alone -
+an automation, an entity, or a whole device (excludes all of that
+device's entities, not just individually labeled ones) - and pick that
+label here. A labeled automation is skipped entirely by *both* sensors:
+never flagged by the trace-based failed-automations sensor even if it
+errors, and skipped as a reference-map source here (its referenced
+entities simply aren't tracked via it, though still tracked if another,
+non-excluded automation/script also references them). A labeled entity
+or device is excluded from this sensor the same way an ignored entity is
+(see above). Label changes are picked up on the next periodic rebuild or
+`rebuild_linked_entities` service call, not immediately - same as a
+script content edit, see below; a failed-automations sensor check
+re-evaluates an automation's labels fresh on every trigger, so no reload
+is needed there.
+
 **Keeping the reference map fresh**: rebuilt on automation reload
 (`automation_reloaded` event), on automation/script add/rename/delete
-(`entity_registry_updated`), on HA startup, and as a periodic safety net
-every 20 minutes - the last one exists because there is no equivalent
-`script_reloaded` event, so a script's *content* changing (without
-adding/removing the script entity itself) has no dedicated event to react
-to. Call the `automation_monitor.rebuild_linked_entities` service for an
-immediate rebuild instead of waiting up to 20 minutes after a script edit.
+(`entity_registry_updated`), on an automation being turned on/off (only
+while the toggle above is on), on HA startup, and as a periodic safety
+net every 20 minutes - the last one exists because there is no
+equivalent `script_reloaded` event, so a script's *content* changing
+(without adding/removing the script entity itself) has no dedicated
+event to react to. Call the `automation_monitor.rebuild_linked_entities`
+service for an immediate rebuild instead of waiting up to 20 minutes
+after a script edit.
 
 Templated `entity_id`/`device_id`/`area_id` targets are not resolvable
 statically - same limitation Watchman already has for entity-existence
 checks, just for availability instead of existence. Like the trace access
 above, this relies on internal-ish HA behavior (event names, registry
-helper functions) that isn't a fully documented stable API - see Testing
-notes for what's been checked live so far.
+helper functions) that isn't a fully documented stable API.
 
 ## Persistent notifications
 
@@ -381,6 +418,36 @@ which you can run alongside these toggles (they don't conflict; one
 updates a persistent card, the other fires a one-off notification per new
 failure).
 
+## Language
+
+English, German, French and Spanish (`en`/`de`/`fr`/`es`) so far - German
+was added first, requested by a German-speaking user who found the
+(English-only, at the time) persistent notifications hard to follow.
+Automatically follows HA's own system language (Settings → System →
+General → Language, `hass.config.language`) - nothing to configure.
+Falls back to English for any other language.
+
+Two separate mechanisms, both covered:
+
+- **Entity names and the Options dialog** go through HA's own built-in
+  translation system (`strings.json` + `translations/<lang>.json`) - the
+  standard mechanism every HA integration uses, so nothing special here.
+- **Persistent notification text** (title + body, see Persistent
+  notifications) is generated at runtime from live data, which HA's
+  translation system doesn't cover at all - that only handles static
+  form/entity text, not text built dynamically in Python. Translated by
+  hand instead, via a small string table in `notifications.py`
+  (`SUPPORTED_LANGUAGES`, `_STRINGS`) - entity/automation *names* and
+  error messages themselves are never translated (they're your own data,
+  or another integration's error text), only the surrounding English
+  words ("unavailable since", "used by", ...).
+
+Adding another language: for the Options dialog/entity names, add
+`translations/<lang>.json` mirroring `translations/en.json`. For the
+notifications, add an entry to `_STRINGS` in `notifications.py` and the
+language code to `SUPPORTED_LANGUAGES`. Not yet verified live with
+`hass.config.language` actually set to `de` on a running instance.
+
 ## Actions
 
 `automation_monitor.reset` clears currently tracked failures without
@@ -406,6 +473,38 @@ content: >
   {{ a.error_message }}
 
   {% endfor %}
+```
+
+A more detailed variant, shared by community member ArnaudFeld
+([smarterkram.de forum](https://community.smarterkram.de/t/automation-monitor-neue-hacs-integration-fuer-fehlgeschlagene-automationen/551/8)) -
+a heading with the current failure count, one block per failed automation
+(name, entity_id, error step, formatted timestamp, error message), and a
+success message when there's nothing to report:
+
+```yaml
+type: markdown
+content: >
+  {% set monitor_entity = 'sensor.failed_automations' %}
+  {% set failed_list = state_attr(monitor_entity, 'automations') %}
+  {% if failed_list is defined and failed_list and failed_list | length > 0 %}
+    # 🚨 Fehlgeschlagene Automatisierungen ({{ failed_list | length }})
+
+    {% for item in failed_list %}
+      ### ❌ {{ item.name }}
+      * **Entität:** `{{ item.entity_id }}`
+      * **Fehler-Schritt:** `{{ item.error_step }}`
+      * **Zeitpunkt:** {{ as_timestamp(item.last_error_time) | timestamp_custom('%d.%m.%Y um %H:%M Uhr') }}
+
+      > **Fehlermeldung:**
+      > `{{ item.error_message }}`
+
+      ---
+    {% endfor %}
+  {% else %}
+    # ✅ Automatisierungs-Monitor
+
+    🎉 **Alles super!** Aktuell wurden keine fehlerhaften Automatisierungen erfasst.
+  {% endif %}
 ```
 
 Same pattern for the linked-entities sensor, using its `entities` attribute:

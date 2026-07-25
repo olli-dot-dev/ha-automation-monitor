@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Automation Monitor",
+        "description": "Detecta ejecuciones fallidas de automatizaciones y las expone como un sensor. No requiere configuración."
+      }
+    },
+    "abort": {
+      "already_configured": "Automation Monitor ya está configurado."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Automation Monitor",
+        "description": "Durante cuánto tiempo una entidad referenciada por una automatización o script debe permanecer continuamente no disponible antes de ser marcada, qué entidades excluir por completo de esta comprobación, qué etiquetas excluyen por completo de la monitorización a las automatizaciones/entidades/dispositivos que las llevan, si se deben omitir las automatizaciones actualmente desactivadas, y si se debe mostrar una notificación persistente para cada sensor.",
+        "data": {
+          "unavailable_threshold_minutes": "Umbral de no disponibilidad (minutos)",
+          "ignored_entities": "Entidades ignoradas (nunca marcadas)",
+          "excluded_labels": "Etiquetas excluidas (automatizaciones/entidades/dispositivos)",
+          "exclude_off_automations": "Omitir automatizaciones desactivadas",
+          "notify_failed_automations": "Notificar automatizaciones fallidas",
+          "notify_linked_entities_unavailable": "Notificar entidades vinculadas no disponibles"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "failed_automations": {
+        "name": "Automatizaciones fallidas"
+      },
+      "linked_entities_unavailable": {
+        "name": "Entidades vinculadas no disponibles"
+      }
+    }
+  }
+}

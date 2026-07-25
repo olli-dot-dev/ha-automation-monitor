@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Automation Monitor",
+        "description": "Détecte les exécutions d'automatisations en échec et les expose sous forme de capteur. Aucune configuration nécessaire."
+      }
+    },
+    "abort": {
+      "already_configured": "Automation Monitor est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options d'Automation Monitor",
+        "description": "Durée pendant laquelle une entité référencée par une automatisation ou un script doit rester continuellement indisponible avant d'être signalée, quelles entités exclure entièrement de cette vérification, quelles étiquettes excluent entièrement de la surveillance les automatisations/entités/appareils qui les portent, s'il faut ignorer les automatisations actuellement désactivées, et s'il faut afficher une notification persistante pour chaque capteur.",
+        "data": {
+          "unavailable_threshold_minutes": "Seuil d'indisponibilité (minutes)",
+          "ignored_entities": "Entités ignorées (jamais signalées)",
+          "excluded_labels": "Étiquettes exclues (automatisations/entités/appareils)",
+          "exclude_off_automations": "Ignorer les automatisations désactivées",
+          "notify_failed_automations": "Notifier en cas d'automatisations en échec",
+          "notify_linked_entities_unavailable": "Notifier en cas d'entités liées indisponibles"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "failed_automations": {
+        "name": "Automatisations en échec"
+      },
+      "linked_entities_unavailable": {
+        "name": "Entités liées indisponibles"
+      }
+    }
+  }
+}

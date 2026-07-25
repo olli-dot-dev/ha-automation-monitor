@@ -32,6 +32,80 @@ _EDITOR_PATH_BY_DOMAIN = {"automation": "automation", "script": "script"}
 # support relative imports; DOMAIN is effectively fixed anyway.
 _INTEGRATION_SETTINGS_URL = "/config/integrations/integration/automation_monitor"
 
+# Notification title/body text, translated by hand here rather than via
+# HA's strings.json/translations/*.json mechanism - that only covers
+# static config/options-flow form text and entity names (see
+# sensor.py's _attr_translation_key), not free-form text built at
+# runtime from live data like these notifications. `lang` is a plain
+# 2-letter code (from hass.config.language, resolved in __init__.py -
+# this module still has no HA imports, see module docstring). Falls back
+# to English for anything unsupported - see _t().
+SUPPORTED_LANGUAGES = ("en", "de", "fr", "es")
+_DEFAULT_LANGUAGE = "en"
+
+_STRINGS: dict[str, dict[str, str]] = {
+    "en": {
+        "title_failed_automations": "Automation Monitor: failed automations",
+        "title_linked_entities": "Automation Monitor: unavailable linked entities",
+        "unavailable_since": "unavailable since",
+        "used_by": "used by",
+        "ignore_hint": (
+            "To ignore an entity: copy its entity_id above, then paste it "
+            "in under"
+        ),
+        "settings_link_text": "Automation Monitor settings",
+    },
+    "de": {
+        "title_failed_automations": "Automation Monitor: Fehlgeschlagene Automationen",
+        "title_linked_entities": "Automation Monitor: Nicht verfügbare verknüpfte Entitäten",
+        "unavailable_since": "nicht verfügbar seit",
+        "used_by": "verwendet von",
+        "ignore_hint": (
+            "Zum Ignorieren: entity_id oben kopieren und unter folgendem "
+            "Link einfügen:"
+        ),
+        "settings_link_text": "Automation-Monitor-Einstellungen",
+    },
+    "fr": {
+        "title_failed_automations": "Automation Monitor : automatisations en échec",
+        "title_linked_entities": "Automation Monitor : entités liées indisponibles",
+        "unavailable_since": "indisponible depuis",
+        "used_by": "utilisé par",
+        "ignore_hint": (
+            "Pour ignorer une entité : copiez son entity_id ci-dessus, "
+            "puis collez-le sous"
+        ),
+        "settings_link_text": "Paramètres d'Automation Monitor",
+    },
+    "es": {
+        "title_failed_automations": "Automation Monitor: automatizaciones fallidas",
+        "title_linked_entities": "Automation Monitor: entidades vinculadas no disponibles",
+        "unavailable_since": "no disponible desde",
+        "used_by": "usado por",
+        "ignore_hint": (
+            "Para ignorar una entidad: copia su entity_id de arriba y "
+            "pégalo en"
+        ),
+        "settings_link_text": "Ajustes de Automation Monitor",
+    },
+}
+
+
+def _t(lang: str, key: str) -> str:
+    """Look up one translated string, falling back to English for an
+    unsupported language or (defensively) a missing key - a translation
+    gap must never crash the notification, just read a bit awkward."""
+    table = _STRINGS.get(lang, _STRINGS[_DEFAULT_LANGUAGE])
+    return table.get(key, _STRINGS[_DEFAULT_LANGUAGE][key])
+
+
+def failed_automations_title(lang: str = _DEFAULT_LANGUAGE) -> str:
+    return _t(lang, "title_failed_automations")
+
+
+def linked_entities_title(lang: str = _DEFAULT_LANGUAGE) -> str:
+    return _t(lang, "title_linked_entities")
+
 
 def _format_timestamp(iso_string: str) -> str:
     """Human-readable "YYYY-MM-DD HH:MM" in the *local* timezone, instead
@@ -106,10 +180,17 @@ def _source_link(source: dict[str, Any]) -> str:
     return source["name"]
 
 
-def build_failed_automations_message(data: dict[str, dict[str, Any]]) -> str:
+def build_failed_automations_message(
+    data: dict[str, dict[str, Any]], lang: str = _DEFAULT_LANGUAGE
+) -> str:
     """One line per currently-failed automation. Empty string if `data` is
     empty - caller is expected to dismiss the notification in that case
-    rather than show an empty one."""
+    rather than show an empty one.
+
+    `error_message` itself is never translated - it's HA's/the failing
+    integration's own error text, passed through verbatim (see
+    coordinator.py), not something this project can meaningfully
+    translate."""
     lines = [
         f"- {_automation_editor_link(info.get('unique_id'), info['entity_id'], info['name'])}: "
         f"{info['error_message']}"
@@ -118,7 +199,9 @@ def build_failed_automations_message(data: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_linked_entities_message(data: dict[str, dict[str, Any]]) -> str:
+def build_linked_entities_message(
+    data: dict[str, dict[str, Any]], lang: str = _DEFAULT_LANGUAGE
+) -> str:
     """One line per currently-unavailable linked entity: a link to its
     device (or its own settings, if it has no device), its raw entity_id
     in copyable inline-code formatting (see settings-link hint below),
@@ -137,18 +220,18 @@ def build_linked_entities_message(data: dict[str, dict[str, Any]]) -> str:
         link = _device_or_entity_link(info["entity_id"], info["name"], info.get("device_id"))
         line = (
             f"- {link} (`{info['entity_id']}`) "
-            f"unavailable since {_format_timestamp(info['unavailable_since'])}"
+            f"{_t(lang, 'unavailable_since')} {_format_timestamp(info['unavailable_since'])}"
         )
         sources = info.get("referenced_by_details") or []
         if sources:
-            line += " · used by " + ", ".join(_source_link(s) for s in sources)
+            line += f" · {_t(lang, 'used_by')} " + ", ".join(_source_link(s) for s in sources)
         lines.append(line)
 
     if not lines:
         return ""
 
     lines.append(
-        f"\nTo ignore an entity: copy its entity_id above, then paste it in "
-        f"under [Automation Monitor settings]({_INTEGRATION_SETTINGS_URL})"
+        f"\n{_t(lang, 'ignore_hint')} "
+        f"[{_t(lang, 'settings_link_text')}]({_INTEGRATION_SETTINGS_URL})"
     )
     return "\n".join(lines)

@@ -14,13 +14,25 @@
     "step": {
       "init": {
         "title": "Automation Monitor options",
-        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which entities to exclude from this check entirely, and whether to show a persistent notification for each sensor.",
+        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which entities to exclude from this check entirely, which labels exclude the automations/entities/devices carrying them from monitoring entirely, whether to skip currently turned-off automations, and whether to show a persistent notification for each sensor.",
         "data": {
           "unavailable_threshold_minutes": "Unavailable threshold (minutes)",
           "ignored_entities": "Ignored entities (never flagged)",
+          "excluded_labels": "Excluded labels (automations/entities/devices)",
+          "exclude_off_automations": "Skip automations that are turned off",
           "notify_failed_automations": "Notify on failed automations",
           "notify_linked_entities_unavailable": "Notify on unavailable linked entities"
         }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "failed_automations": {
+        "name": "Failed automations"
+      },
+      "linked_entities_unavailable": {
+        "name": "Linked entities unavailable"
       }
     }
   }

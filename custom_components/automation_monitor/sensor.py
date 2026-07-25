@@ -30,7 +30,7 @@ class FailedAutomationsSensor(CoordinatorEntity[AutomationMonitorCoordinator], S
     """Number of currently failed automations, with details as attributes."""
 
     _attr_has_entity_name = True
-    _attr_name = "Failed automations"
+    _attr_translation_key = "failed_automations"
     _attr_icon = "mdi:robot-confused"
 
     def __init__(self, coordinator: AutomationMonitorCoordinator, entry: ConfigEntry) -> None:
@@ -56,7 +56,7 @@ class LinkedEntitiesUnavailableSensor(
     "Known limitations")."""
 
     _attr_has_entity_name = True
-    _attr_name = "Linked entities unavailable"
+    _attr_translation_key = "linked_entities_unavailable"
     _attr_icon = "mdi:lan-disconnect"
 
     def __init__(self, coordinator: LinkedEntitiesCoordinator, entry: ConfigEntry) -> None:

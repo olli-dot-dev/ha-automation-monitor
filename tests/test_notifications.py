@@ -20,6 +20,9 @@ _spec.loader.exec_module(_notifications)
 
 build_failed_automations_message = _notifications.build_failed_automations_message
 build_linked_entities_message = _notifications.build_linked_entities_message
+failed_automations_title = _notifications.failed_automations_title
+linked_entities_title = _notifications.linked_entities_title
+SUPPORTED_LANGUAGES = _notifications.SUPPORTED_LANGUAGES
 
 
 # --- build_failed_automations_message ---------------------------------
@@ -283,3 +286,93 @@ def test_build_linked_entities_message_shows_entity_id_as_inline_code():
     }
     message = build_linked_entities_message(data)
     assert "(`media_player.x`)" in message
+
+
+# --- Translation (lang parameter) ---------------------------------------
+
+
+def test_default_language_is_english():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    with_default = build_linked_entities_message(data)
+    with_explicit_en = build_linked_entities_message(data, "en")
+    assert with_default == with_explicit_en
+    assert "unavailable since" in with_default
+
+
+def test_build_linked_entities_message_german():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    message = build_linked_entities_message(data, "de")
+    assert "nicht verfügbar seit" in message
+    assert "unavailable since" not in message
+
+
+def test_build_linked_entities_message_german_used_by():
+    data = {
+        "light.x": {
+            "entity_id": "light.x",
+            "name": "X",
+            "unavailable_since": "t1",
+            "referenced_by_details": [
+                {"entity_id": "automation.a", "name": "A", "unique_id": "1", "domain": "automation"}
+            ],
+        }
+    }
+    message = build_linked_entities_message(data, "de")
+    assert "verwendet von" in message
+    assert "used by" not in message
+
+
+def test_build_linked_entities_message_german_ignore_hint():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    message = build_linked_entities_message(data, "de")
+    assert "Zum Ignorieren" in message
+    assert "[Automation-Monitor-Einstellungen]" in message
+
+
+def test_build_linked_entities_message_french():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    message = build_linked_entities_message(data, "fr")
+    assert "indisponible depuis" in message
+    assert "unavailable since" not in message
+
+
+def test_build_linked_entities_message_spanish():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    message = build_linked_entities_message(data, "es")
+    assert "no disponible desde" in message
+    assert "unavailable since" not in message
+
+
+def test_build_linked_entities_message_unsupported_language_falls_back_to_english():
+    data = {"light.x": {"entity_id": "light.x", "name": "X", "unavailable_since": "t1"}}
+    message = build_linked_entities_message(data, "it")
+    assert "unavailable since" in message
+
+
+def test_titles_are_translated():
+    assert failed_automations_title("en") == "Automation Monitor: failed automations"
+    assert failed_automations_title("de") == "Automation Monitor: Fehlgeschlagene Automationen"
+    assert failed_automations_title("fr") == "Automation Monitor : automatisations en échec"
+    assert failed_automations_title("es") == "Automation Monitor: automatizaciones fallidas"
+    assert linked_entities_title("en") == "Automation Monitor: unavailable linked entities"
+    assert (
+        linked_entities_title("de")
+        == "Automation Monitor: Nicht verfügbare verknüpfte Entitäten"
+    )
+    assert linked_entities_title("fr") == "Automation Monitor : entités liées indisponibles"
+    assert (
+        linked_entities_title("es")
+        == "Automation Monitor: entidades vinculadas no disponibles"
+    )
+
+
+def test_titles_fall_back_to_english_for_unsupported_language():
+    assert failed_automations_title("it") == failed_automations_title("en")
+    assert linked_entities_title("it") == linked_entities_title("en")
+
+
+def test_supported_languages_includes_all_four():
+    assert "en" in SUPPORTED_LANGUAGES
+    assert "de" in SUPPORTED_LANGUAGES
+    assert "fr" in SUPPORTED_LANGUAGES
+    assert "es" in SUPPORTED_LANGUAGES

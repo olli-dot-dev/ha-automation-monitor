@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Automation Monitor",
+        "description": "Erkennt fehlgeschlagene Automatisierungsläufe und stellt sie als Sensor bereit. Keine Einrichtung nötig."
+      }
+    },
+    "abort": {
+      "already_configured": "Automation Monitor ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Automation Monitor Einstellungen",
+        "description": "Wie lange eine von einer Automation oder einem Skript referenzierte Entität durchgehend nicht verfügbar sein muss, bevor sie markiert wird, welche Entitäten von dieser Prüfung komplett ausgeschlossen werden sollen, welche Labels die damit versehenen Automationen/Entitäten/Geräte komplett von der Überwachung ausschließen, ob aktuell deaktivierte Automationen übersprungen werden sollen, und ob für jeden Sensor eine dauerhafte Benachrichtigung angezeigt werden soll.",
+        "data": {
+          "unavailable_threshold_minutes": "Schwellwert für nicht verfügbar (Minuten)",
+          "ignored_entities": "Ignorierte Entitäten (werden nie markiert)",
+          "excluded_labels": "Ausgeschlossene Labels (Automationen/Entitäten/Geräte)",
+          "exclude_off_automations": "Deaktivierte Automationen überspringen",
+          "notify_failed_automations": "Bei fehlgeschlagenen Automationen benachrichtigen",
+          "notify_linked_entities_unavailable": "Bei nicht verfügbaren verknüpften Entitäten benachrichtigen"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "failed_automations": {
+        "name": "Fehlgeschlagene Automationen"
+      },
+      "linked_entities_unavailable": {
+        "name": "Nicht verfügbare verknüpfte Entitäten"
+      }
+    }
+  }
+}
