@@ -2,6 +2,35 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.7.1] - 2026-07-25
+
+- Fixed the linked-entities-unavailable sensor over-attributing "used by"
+  for area/device-targeted automations and scripts (reported in #1: a
+  media_player falsely shown as "used by" several light/climate/cover
+  automations that merely shared its area, none of which ever call a
+  media_player service). The reference-map builder previously expanded
+  an automation/script's area or device target to *every* entity in that
+  area/device regardless of domain - `light.turn_off` with
+  `area_id: eg` was treated as referencing a `media_player.*` entity
+  simply for being physically in the same area, even though that action
+  can never affect it. `_referenced_entities_for()` in
+  `linked_entities_coordinator.py` now walks the actual action sequence
+  itself (`_domain_scoped_targets()`, new) and pairs each area_id/
+  device_id target with the domain of the service/device-automation call
+  it came from, only counting entities of that same domain as
+  referenced. Direct entity_id references (from triggers, conditions, or
+  actions) are unaffected - always a deliberate reference regardless of
+  domain. Also corrected a docstring claim that the old (over-broad)
+  approach matched HA's own device "Related" tab - checked against HA's
+  `search` component source: the Related tab only ever looks for direct
+  device/entity references, never expands "automation targets this
+  area, entity X is also in that area" the way the old code here did.
+  Live-verified on a real instance: a domain-matched entity in a
+  targeted area is still correctly flagged as "used by" the right
+  automation/script, while a domain-mismatched entity on the same device
+  in the same area is correctly no longer included, even though it was
+  eligible under the old code (enabled, in the targeted area).
+
 ## [0.7.0] - 2026-07-25
 
 - Added a "Skip automations that are turned off" toggle to the Options

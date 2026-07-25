@@ -25,7 +25,25 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (
+    ATTR_AREA_ID,
+    ATTR_DEVICE_ID,
+    CONF_ACTION,
+    CONF_CHOOSE,
+    CONF_DEFAULT,
+    CONF_DEVICE_ID,
+    CONF_DOMAIN,
+    CONF_ELSE,
+    CONF_IF,
+    CONF_PARALLEL,
+    CONF_SEQUENCE,
+    CONF_SERVICE_DATA,
+    CONF_SERVICE_DATA_TEMPLATE,
+    CONF_TARGET,
+    CONF_THEN,
+)
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
@@ -73,48 +91,212 @@ _TRACKED_DOMAINS = ("automation", "script")
 _TRACKED_ENTITY_PREFIXES = ("automation.", "script.")
 
 
+def _extract_target_ids(data: Any, key: str) -> list[str]:
+    """One target field (area_id/device_id) from a service-call step's
+    target/data dict, as a list - handles both the single-string and
+    list forms HA's schema allows. A templated (dynamic) value is
+    neither a `str` nor a `list` (it's a `template.Template` instance) -
+    falls through to `[]`, i.e. skipped rather than guessed, same as HA's
+    own (module-private, so not importable) `Script._referenced_extract_ids`."""
+    if not isinstance(data, dict):
+        return []
+    value = data.get(key)
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _domain_scoped_targets(
+    sequence: list[dict[str, Any]],
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Walk one automation/script's already-validated action sequence
+    (`entity.action_script.sequence` / `entity.script.sequence`),
+    returning [(domain, area_id), ...] and [(domain, device_id), ...]
+    pairs from actual service-call and device-automation steps only -
+    deliberately not from conditions/triggers, see
+    _referenced_entities_for for why.
+
+    `domain` is the service/device-automation's own domain (e.g. "light"
+    from a `light.turn_off` call), needed to correctly scope an area/
+    device target: `light.turn_off` with `area_id: eg` only ever affects
+    `light.*` entities in that area, never e.g. `media_player.*` ones
+    merely also located there - see GitHub issue #1, which reported
+    exactly that: a media_player falsely shown as "used by" several
+    light/climate/cover automations that only shared its area, none of
+    which ever call a media_player service.
+
+    Mirrors the recursion structure of HA's own (module-private, so
+    reimplemented rather than imported) `Script._find_referenced_devices`
+    / `_find_referenced_target` (homeassistant/helpers/script.py,
+    verified against the 2026.7.4 source) - re-verify against a live
+    instance if this stops matching, same caveat as the rest of this
+    project's reliance on HA-internal structure.
+
+    A templated whole-step `action:` value (not a literal "domain.method"
+    string) can't be domain-scoped statically either - skipped for that
+    step, same as an unresolvable target value already is (see
+    _extract_target_ids).
+    """
+    area_targets: list[tuple[str, str]] = []
+    device_targets: list[tuple[str, str]] = []
+
+    for step in sequence:
+        try:
+            action = cv.determine_script_action(step)
+        except ValueError:
+            continue
+
+        if action == cv.SCRIPT_ACTION_CALL_SERVICE:
+            service = step.get(CONF_ACTION)
+            if not isinstance(service, str) or "." not in service:
+                continue  # templated action string - not statically known
+            call_domain = service.split(".", 1)[0]
+            for data in (
+                step.get(CONF_TARGET),
+                step.get(CONF_SERVICE_DATA),
+                step.get(CONF_SERVICE_DATA_TEMPLATE),
+            ):
+                area_targets += [
+                    (call_domain, area_id)
+                    for area_id in _extract_target_ids(data, ATTR_AREA_ID)
+                ]
+                device_targets += [
+                    (call_domain, device_id)
+                    for device_id in _extract_target_ids(data, ATTR_DEVICE_ID)
+                ]
+
+        elif action == cv.SCRIPT_ACTION_DEVICE_AUTOMATION:
+            device_action_domain = step.get(CONF_DOMAIN)
+            device_id = step.get(CONF_DEVICE_ID)
+            if isinstance(device_action_domain, str) and isinstance(device_id, str):
+                device_targets.append((device_action_domain, device_id))
+
+        elif action == cv.SCRIPT_ACTION_CHOOSE:
+            for choice in step.get(CONF_CHOOSE, []):
+                sub_areas, sub_devices = _domain_scoped_targets(
+                    choice.get(CONF_SEQUENCE, [])
+                )
+                area_targets += sub_areas
+                device_targets += sub_devices
+            if CONF_DEFAULT in step:
+                sub_areas, sub_devices = _domain_scoped_targets(step[CONF_DEFAULT])
+                area_targets += sub_areas
+                device_targets += sub_devices
+
+        elif action == cv.SCRIPT_ACTION_IF:
+            sub_areas, sub_devices = _domain_scoped_targets(step.get(CONF_THEN, []))
+            area_targets += sub_areas
+            device_targets += sub_devices
+            if CONF_ELSE in step:
+                sub_areas, sub_devices = _domain_scoped_targets(step[CONF_ELSE])
+                area_targets += sub_areas
+                device_targets += sub_devices
+
+        elif action == cv.SCRIPT_ACTION_PARALLEL:
+            for sub_script in step.get(CONF_PARALLEL, []):
+                sub_areas, sub_devices = _domain_scoped_targets(
+                    sub_script.get(CONF_SEQUENCE, [])
+                )
+                area_targets += sub_areas
+                device_targets += sub_devices
+
+        elif action == cv.SCRIPT_ACTION_SEQUENCE:
+            sub_areas, sub_devices = _domain_scoped_targets(
+                step.get(CONF_SEQUENCE, [])
+            )
+            area_targets += sub_areas
+            device_targets += sub_devices
+
+    return area_targets, device_targets
+
+
+def _action_sequence_for(
+    hass: HomeAssistant, domain: str, entity_id: str
+) -> list[dict[str, Any]]:
+    """The already-validated action sequence for one automation/script
+    entity - `entity.action_script.sequence` / `entity.script.sequence`,
+    the same `Script` instance HA's own trigger/run path uses.
+    `hass.data[domain]` is the domain's `EntityComponent` - "automation"/
+    "script" are stable, unchanging domain names, same as elsewhere in
+    this module (_TRACKED_DOMAINS), so no need to import the
+    component's own DATA_COMPONENT/DOMAIN constant just to spell the
+    same string differently.
+
+    `[]` for an entity that failed validation
+    (`UnavailableAutomationEntity`/`UnavailableScriptEntity` - has no
+    action_script/script attribute at all) or isn't found - same
+    "degrade to nothing extra, don't crash the rebuild" approach as the
+    rest of this module."""
+    component = hass.data.get(domain)
+    if component is None:
+        return []
+    entity = component.get_entity(entity_id)
+    if entity is None:
+        return []
+    script = getattr(entity, "action_script" if domain == "automation" else "script", None)
+    if script is None:
+        return []
+    return script.sequence
+
+
 def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -> set[str]:
     """Return every entity_id referenced by one automation/script,
     including ones reached only via a device or area target.
 
     Verified against the installed Home Assistant source
     (homeassistant/components/automation/__init__.py,
-    homeassistant/components/script/__init__.py) - re-verify against a
-    live 2026.7.1 instance before relying on this, per this project's
-    convention:
+    homeassistant/components/script/__init__.py,
+    homeassistant/helpers/script.py, homeassistant/components/search/
+    __init__.py - all checked against 2026.7.4) - re-verify against a
+    live instance before relying on this, per this project's convention:
 
-    - `entities_in_automation`/`devices_in_automation`/`areas_in_automation`
-      (and the `script` module's equivalents) are the same public
-      functions that power HA's own "Related" tab in the automation/script
-      editor - reused here instead of re-implementing config-walking.
-    - Templated entity_id/device_id/area_id targets are NOT resolvable
-      statically - HA's own `Script._find_referenced_entities` explicitly
-      skips `template.Template` values. Same static-analysis limit
-      Watchman already has for entity-existence checks, just for
-      availability instead of existence.
+    - `entities_in_automation`/`entities_in_script` (direct, literal
+      entity_id references from anywhere - triggers, conditions,
+      actions) are reused as-is - always a deliberate, correct
+      reference regardless of domain.
+    - Device/area targets are deliberately NOT resolved the
+      domain-agnostic way HA's own `devices_in_automation`/
+      `areas_in_automation` (and script equivalents) do it - those just
+      collect raw area_id/device_id values from anywhere in the config,
+      with no link back to which domain the action they came from
+      actually calls. Naively expanding that to "every entity in this
+      area/device" caused GitHub issue #1: a media_player falsely
+      flagged as "used by" light/climate/cover automations that merely
+      shared its area, none of which ever call a media_player service.
+      This also corrected a prior claim in this docstring that the old
+      approach matched HA's own "Related" tab - checked against
+      `homeassistant/components/search/__init__.py`
+      (`_async_search_device`): the Related tab only ever looks for
+      *direct* device/entity references and never expands "an automation
+      targets this area, entity X is also in that area" the way the old
+      code here did, so the old approach was actually broader than HA's
+      own UI, not equivalent to it.
+    - Fix: `_domain_scoped_targets` walks the actual action sequence
+      itself (service-call/device-automation steps only, not
+      conditions/triggers) pairing each area_id/device_id target with
+      the domain of the action it came from; only entities of that same
+      domain in the area/device are then added as referenced.
+    - Templated entity_id/device_id/area_id targets, and a templated
+      whole `action:` string, are not resolvable statically either way -
+      skipped, not guessed. Same static-analysis limit Watchman already
+      has for entity-existence checks, just for availability instead of
+      existence.
     """
     if domain == "automation":
-        from homeassistant.components.automation import (
-            areas_in_automation,
-            devices_in_automation,
-            entities_in_automation,
-        )
+        from homeassistant.components.automation import entities_in_automation
 
         direct = entities_in_automation(hass, entity_id)
-        device_ids = devices_in_automation(hass, entity_id)
-        area_ids = areas_in_automation(hass, entity_id)
     else:
-        from homeassistant.components.script import (
-            areas_in_script,
-            devices_in_script,
-            entities_in_script,
-        )
+        from homeassistant.components.script import entities_in_script
 
         direct = entities_in_script(hass, entity_id)
-        device_ids = devices_in_script(hass, entity_id)
-        area_ids = areas_in_script(hass, entity_id)
 
     referenced: set[str] = set(direct)
+
+    sequence = _action_sequence_for(hass, domain, entity_id)
+    area_targets, device_targets = _domain_scoped_targets(sequence)
 
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
@@ -122,18 +304,22 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
     # Device/area references are resolved to entity_ids via
     # entity_registry.async_entries_for_device/async_entries_for_area and
     # device_registry.async_entries_for_area (devices in an area -> their
-    # entities). Disabled entities are excluded (default
+    # entities), filtered to the calling action's own domain (see
+    # docstring above). Disabled entities are excluded (default
     # include_disabled_entities=False).
-    for device_id in device_ids:
+    for target_domain, device_id in device_targets:
         for entry in er.async_entries_for_device(ent_reg, device_id):
-            referenced.add(entry.entity_id)
+            if entry.domain == target_domain:
+                referenced.add(entry.entity_id)
 
-    for area_id in area_ids:
+    for target_domain, area_id in area_targets:
         for entry in er.async_entries_for_area(ent_reg, area_id):
-            referenced.add(entry.entity_id)
+            if entry.domain == target_domain:
+                referenced.add(entry.entity_id)
         for device in dr.async_entries_for_area(dev_reg, area_id):
             for entry in er.async_entries_for_device(ent_reg, device.id):
-                referenced.add(entry.entity_id)
+                if entry.domain == target_domain:
+                    referenced.add(entry.entity_id)
 
     return referenced
 
