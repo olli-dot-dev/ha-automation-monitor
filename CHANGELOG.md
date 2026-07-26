@@ -2,6 +2,31 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.7.2] - 2026-07-26
+
+- Fixed a stale persistent notification surviving a config-entry reload
+  (e.g. saving any Options field) with data that no longer matched
+  reality: `sensor.failed_automations`/`sensor.linked_entities_unavailable`
+  correctly reset to empty on reload (both coordinators are recreated from
+  scratch), but the notification listeners in `__init__.py` only run on a
+  *subsequent* coordinator update (`coordinator.async_add_listener`)
+  - never on setup itself, since each coordinator's `self.data` is set
+  directly in `__init__` rather than via `async_set_updated_data()`. A
+  notification already shown before the reload (e.g. a real tracked
+  failure) was therefore left displaying stale, now-incorrect data
+  until the next actual trigger/state-change event happened to come in
+  - which, for a fixed problem or a quiet system, could be a long time
+  or never. `async_setup_entry` now calls both notification-sync
+  callbacks once explicitly right after registering them as listeners,
+  so setup (including every options-triggered reload) always reconciles
+  the notification to current reality immediately. Found via live
+  testing on .208: toggled `notify_failed_automations` off while a real
+  tracked failure and its notification were both active - the sensor
+  reset to `0` as expected, but the notification kept showing the old
+  failure until this fix. Live-verified after the fix (full restart,
+  since this is a `.py` change): the stale notification is now dismissed
+  immediately on setup.
+
 ## [0.7.1] - 2026-07-25
 
 - Fixed the linked-entities-unavailable sensor over-attributing "used by"

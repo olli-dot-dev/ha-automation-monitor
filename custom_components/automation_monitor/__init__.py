@@ -119,6 +119,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         linked_entities_coordinator.async_add_listener(_update_linked_entities_notification)
     )
+    # Sync both notifications to the coordinators' current state right away,
+    # not just on the next update: a coordinator's `.data` is set directly
+    # rather than via `async_set_updated_data()` at construction time (see
+    # coordinator.py / linked_entities_coordinator.py `__init__`), so the
+    # listeners above never fire on setup itself. Without this, an options
+    # save (which reloads the whole config entry - see
+    # `_async_options_updated`) silently resets both coordinators to empty
+    # while leaving any already-shown notification stale/orphaned - visibly
+    # wrong once a real failure/unavailable entity had been reported before
+    # the reload. Found via live testing on 2026-07-26: the failed
+    # automations sensor read 0 right after an options save, but the
+    # persistent notification still showed the pre-reload failure.
+    _update_failed_automations_notification()
+    _update_linked_entities_notification()
 
     async def _async_handle_reset(call: ServiceCall) -> None:
         target_entity_id = call.data.get(ATTR_ENTITY_ID)
