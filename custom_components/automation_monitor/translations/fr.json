@@ -13,16 +13,46 @@
   "options": {
     "step": {
       "init": {
+        "menu_options": {
+          "general": "Paramètres généraux",
+          "entities": "Entités",
+          "automations": "Automatisations"
+        }
+      },
+      "general": {
         "title": "Options d'Automation Monitor",
-        "description": "Durée pendant laquelle une entité référencée par une automatisation ou un script doit rester continuellement indisponible avant d'être signalée, quelles entités exclure entièrement de cette vérification, quelles étiquettes excluent entièrement de la surveillance les automatisations/entités/appareils qui les portent, s'il faut ignorer les automatisations actuellement désactivées, et s'il faut afficher une notification persistante pour chaque capteur.",
+        "description": "Durée pendant laquelle une entité référencée par une automatisation ou un script doit rester continuellement indisponible avant d'être signalée, quelles étiquettes excluent entièrement de la surveillance les automatisations/entités/appareils qui les portent (toujours les deux capteurs à la fois - pour des réglages propres aux entités ou aux automatisations, voir les entrées de menu « Entités »/« Automatisations »), s'il faut ouvrir un ticket Réparations pour chaque capteur (Paramètres -> Réparations, réservé aux administrateurs), et combien d'échecs consécutifs une automatisation nécessite avant d'être signalée.",
         "data": {
           "unavailable_threshold_minutes": "Seuil d'indisponibilité (minutes)",
-          "ignored_entities": "Entités ignorées (jamais signalées)",
-          "excluded_labels": "Étiquettes exclues (automatisations/entités/appareils)",
-          "exclude_off_automations": "Ignorer les automatisations désactivées",
-          "notify_failed_automations": "Notifier en cas d'automatisations en échec",
-          "notify_linked_entities_unavailable": "Notifier en cas d'entités liées indisponibles"
+          "excluded_labels": "Étiquettes exclues (automatisations/entités/appareils, toujours les deux capteurs)",
+          "notify_failed_automations": "Ouvrir un ticket Réparations pour les automatisations en échec",
+          "notify_linked_entities_unavailable": "Ouvrir un ticket Réparations pour les entités liées indisponibles",
+          "failure_streak_threshold": "Seuil d'échecs consécutifs (avant signalement)"
         }
+      },
+      "entities": {
+        "title": "Entités",
+        "description": "Réglages au niveau des entités : quelles entités exclure entièrement du capteur « Entités liées indisponibles », et quelles entités ont besoin de leur propre seuil (au lieu de la valeur par défaut globale des Paramètres généraux) pour le capteur « Automatisations en échec ». Les valeurs de seuil sont saisies à l'écran suivant.",
+        "data": {
+          "ignored_entities": "Entités ignorées (concerne uniquement le capteur « Entités liées indisponibles », jamais signalées)",
+          "streak_override_entities": "Entités avec un seuil individuel"
+        }
+      },
+      "streak_overrides": {
+        "title": "Seuil individuel",
+        "description": "Seules les entités sélectionnées à l'écran précédent apparaissent ci-dessous - rien d'autre ne change ici. Le seuil propre à chaque entité : combien d'échecs consécutifs une automatisation qui la sollicite nécessite avant d'être signalée."
+      },
+      "automations": {
+        "title": "Automatisations",
+        "description": "Réglages au niveau des automatisations : s'il faut ignorer les automatisations actuellement désactivées lors de la construction de la carte de références des entités liées, et quelles automatisations doivent être exclues d'un seul capteur au lieu des deux (une étiquette, Paramètres généraux, exclut toujours des deux). Les valeurs d'exclusion sont saisies à l'écran suivant.",
+        "data": {
+          "exclude_off_automations": "Ignorer les automatisations désactivées",
+          "excluded_automations_entities": "Automatisations avec exclusion individuelle par capteur"
+        }
+      },
+      "automation_exclusions": {
+        "title": "Exclusion d'automatisation",
+        "description": "Seules les automatisations sélectionnées à l'écran précédent apparaissent ci-dessous - rien d'autre ne change ici. Pour chacune : de quel(s) capteur(s) elle doit être exclue."
       }
     }
   },
@@ -34,6 +64,21 @@
       "linked_entities_unavailable": {
         "name": "Entités liées indisponibles"
       }
+    },
+    "update": {
+      "update": {
+        "name": "Automation Monitor"
+      }
+    }
+  },
+  "issues": {
+    "failed_automation": {
+      "title": "Automatisation en échec : {name}",
+      "description": "{editor_link} a échoué à l'étape `{error_step}` le {last_error_time}.\n\n**Erreur :** {error_message}"
+    },
+    "linked_entity_unavailable": {
+      "title": "{name} indisponible",
+      "description": "{entity_link} (`{entity_id}`) est indisponible depuis {unavailable_since}.\n\n**Utilisé par :** {used_by}"
     }
   }
 }

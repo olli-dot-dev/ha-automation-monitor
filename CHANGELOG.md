@@ -2,6 +2,105 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.8.0] - 2026-07-27
+
+- Added a failure streak threshold for `sensor.failed_automations`: an
+  automation now needs a configurable number of *consecutive* failures
+  (default 1, i.e. unchanged from before) before it's flagged, instead of
+  always flagging on the very first one. Requested by a real user (forum
+  feedback) whose Zigbee mesh occasionally times out on the first attempt
+  but succeeds on retry - a one-off blip isn't worth flagging, but a
+  genuinely repeated failure still is. Tracked per-automation in-memory
+  (`coordinator.py`, not persisted across restarts, same as the rest of
+  this integration's state); the `reset` action now also resets the
+  streak count, not just the tracked failure, so a reset automation
+  doesn't immediately re-flag itself on its next failure.
+- Added a per-entity override for the streak threshold above (Options →
+  Entities → "Entities with an individual streak threshold") - lets one
+  specific flaky device get more tolerance than the global default,
+  rather than raising the threshold for every automation. Matched via
+  direct `entity_id` references only (an automation's triggers/
+  conditions/actions), not via device/area targets - a deliberate scope
+  cut. If an automation touches several overridden entities, the highest
+  threshold among them wins.
+- Added per-automation, per-sensor exclusion (Options → Automations →
+  "Automations with individual per-sensor exclusion") - narrower than
+  the existing excluded-labels field (which always excludes an automation
+  from *both* sensors at once): lets one automation be excluded from just
+  `sensor.failed_automations` while its referenced entities are still
+  tracked by `sensor.linked_entities_unavailable` (other automations may
+  reference the same entities), or vice versa.
+- Restructured the Options flow from a single form into a three-way menu
+  (General settings / Entities / Automations), grouping settings by *what
+  they configure* rather than by which feature introduced them -
+  `ignored_entities` and `exclude_off_automations` moved out of "General"
+  into the Entities/Automations groups they actually belong to. Went
+  through several iterations based on live feedback before landing here;
+  the per-entity/per-automation override fields each need a second
+  screen (entity/automation picker, then one input field per picked
+  item) since HA's selectors have no single widget for "entity + value"
+  pairs - field labels show "‹friendly name› (‹entity_id›)" rather than
+  a raw entity_id, and the picker screen always defaults to whatever's
+  already configured so re-opening it without touching the picker can't
+  silently wipe existing overrides.
+- **Migrated from persistent notifications to Repairs issues**
+  (Settings → System → Repairs) for both sensors' optional
+  "notify" toggles. `persistent_notification.async_create()` (HA's
+  bell-icon notification) has no per-user/admin targeting at all -
+  verified against the real HA core source: it broadcasts globally to
+  every connected client via a shared dispatcher. A real user reported
+  non-admin household members seeing these, which isn't appropriate for
+  what's fundamentally an admin/maintenance concern - Repairs is
+  admin-only by design. One issue per currently-failed automation /
+  currently-unavailable linked entity now (not one combined card),
+  created/updated/deleted in lockstep with the sensor data
+  (`issue_registry.async_create_issue`/`async_delete_issue` in
+  `__init__.py`'s `_sync_issues`, replacing the old
+  `_async_sync_notification`). `notifications.py`'s hand-rolled
+  per-language string table (needed because persistent-notification text
+  had no way to hook into HA's translation system) is gone entirely -
+  Repairs issues use HA's standard `strings.json`/`translations/<lang>.json`
+  mechanism via `translation_key`/`translation_placeholders`, same as
+  everything else in this integration. `notifications.py` replaced by
+  `issues.py` (pure placeholder-building, same testing approach).
+  Live-verified on .208: issue creation, update-in-place on a repeated
+  failure, deletion on resolution, and deletion via the `reset` action,
+  for both sensors.
+
+## [0.7.3] - 2026-07-27
+
+- Added a new `update.automation_monitor` entity that checks this repo's
+  GitHub Releases for a version newer than what's installed, and links
+  straight to the release notes. Detection only - no install/backup
+  support (`UpdateEntityFeature(0)`), same "detect and expose, don't act"
+  scope as the two sensors; installing an update is still done the normal
+  way (HACS, or a manual copy + restart). Added because this integration
+  isn't on the default HACS store yet (see README Installation), so HACS
+  never creates its own per-repository update entity for it - confirmed
+  absent on a live instance (only `update.hacs_update` existed, nothing
+  for either custom-repository integration installed there). Polls once
+  every 12h (`update_coordinator.py`), plus once immediately on
+  setup/restart so a fresh install doesn't have to wait hours for a
+  first result; a failed check (GitHub unreachable/rate-limited) leaves
+  the entity `unavailable` rather than guessing.
+  Two bugs caught via live testing on .208 before release:
+  - `integration.version` is an `AwesomeVersion` (a `str` subclass with
+    its own `__eq__`), not a plain `str` - assigning it directly to
+    `_attr_installed_version` crashed entity setup with "Not a valid
+    AwesomeVersion object" the moment HA's entity-attribute-caching
+    compared it against its internal sentinel. Fixed by casting to
+    `str()` explicitly before storing.
+  - The entity initially used `has_entity_name = True` with a generic
+    `translation_key`/name ("Update") and no device to group it under -
+    resolved to the unhelpful, collision-prone entity_id `update.update`
+    instead of something identifiable. Fixed by naming it "Automation
+    Monitor" instead, giving `update.automation_monitor`. Note for any
+    future rename like this: an already-registered entity_id doesn't
+    change just because the translation does - the stale registry entry
+    has to be removed (with HA fully stopped, not just restarted, or its
+    own shutdown-time registry save silently undoes a live-edited
+    registry file) before the new name takes effect.
+
 ## [0.7.2] - 2026-07-26
 
 - Fixed a stale persistent notification surviving a config-entry reload

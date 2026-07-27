@@ -16,7 +16,19 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .classification import is_execution_failure
-from .const import CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS, DOMAIN, EVENT_AUTOMATION_TRIGGERED
+from .const import (
+    CONF_ENTITY_STREAK_OVERRIDES,
+    CONF_EXCLUDED_AUTOMATIONS,
+    CONF_EXCLUDED_LABELS,
+    CONF_FAILURE_STREAK_THRESHOLD,
+    DEFAULT_ENTITY_STREAK_OVERRIDES,
+    DEFAULT_EXCLUDED_AUTOMATIONS,
+    DEFAULT_EXCLUDED_LABELS,
+    DEFAULT_FAILURE_STREAK_THRESHOLD,
+    DOMAIN,
+    EVENT_AUTOMATION_TRIGGERED,
+    SCOPE_FAILED_AUTOMATIONS,
+)
 from .labels import entity_has_excluded_label
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,12 +57,85 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         self.data: dict[str, dict[str, Any]] = {}
         self._entry = entry
         self._remove_listener: Any = None
+        # Consecutive-failure count per automation entity_id, purely
+        # in-memory (not persisted across restarts, same as `.data` -
+        # see README "A Home Assistant restart resets both sensors").
+        # Only ever incremented/reset here in _async_process_trigger and
+        # via reset(); never written to directly from __init__.py, unlike
+        # `.data` (kept encapsulated since the reset service needs to
+        # touch both together - see reset()).
+        self._streaks: dict[str, int] = {}
 
     @property
     def _excluded_labels(self) -> set[str]:
         return set(
             self._entry.options.get(CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS)
         )
+
+    @property
+    def _excluded_automations(self) -> dict[str, list[str]]:
+        return self._entry.options.get(
+            CONF_EXCLUDED_AUTOMATIONS, DEFAULT_EXCLUDED_AUTOMATIONS
+        )
+
+    @property
+    def _default_streak_threshold(self) -> int:
+        return self._entry.options.get(
+            CONF_FAILURE_STREAK_THRESHOLD, DEFAULT_FAILURE_STREAK_THRESHOLD
+        )
+
+    @property
+    def _entity_streak_overrides(self) -> dict[str, int]:
+        return self._entry.options.get(
+            CONF_ENTITY_STREAK_OVERRIDES, DEFAULT_ENTITY_STREAK_OVERRIDES
+        )
+
+    def _effective_streak_threshold(self, entity_id: str) -> int:
+        """How many consecutive failures `entity_id` needs before it's
+        flagged - the global default, unless it directly references one
+        or more entities with their own override (CONF_ENTITY_STREAK_OVERRIDES),
+        in which case the *highest* matching override wins (if this
+        automation touches several overridden entities, treat it as
+        tolerantly as the flakiest one among them).
+
+        Matched via HA's own `entities_in_automation` - direct entity_id
+        references only (triggers/conditions/actions), same as the
+        linked-entities sensor's *simplest* resolution path. Deliberately
+        does NOT also resolve device/area targets the way
+        linked_entities_coordinator.py's `_referenced_entities_for` does
+        (domain-scoped device/area expansion) - that logic exists in a
+        different module to stay independent of this one (see this
+        file's module docstring), and duplicating its full complexity
+        here for a threshold nice-to-have wasn't judged worth it. Known
+        limitation: an automation that only reaches the overridden entity
+        via a device/area target won't pick up its override.
+        """
+        overrides = self._entity_streak_overrides
+        if not overrides:
+            return self._default_streak_threshold
+        from homeassistant.components.automation import entities_in_automation
+
+        referenced = entities_in_automation(self.hass, entity_id)
+        matched = [overrides[e] for e in referenced if e in overrides]
+        if matched:
+            return max(matched)
+        return self._default_streak_threshold
+
+    def reset(self, entity_id: str | None) -> None:
+        """Clear a tracked failure (or all of them) and its streak count
+        together - used by the automation_monitor.reset service. Streak
+        must be cleared alongside `.data`, not left behind: otherwise a
+        "reset" automation that had already reached its streak threshold
+        would re-flag itself on its very next failure instead of needing
+        a fresh streak from zero, silently defeating the point of the
+        threshold right after a reset."""
+        if entity_id:
+            self.data.pop(entity_id, None)
+            self._streaks.pop(entity_id, None)
+        else:
+            self.data.clear()
+            self._streaks.clear()
+        self.async_set_updated_data(self.data)
 
     @callback
     def async_setup(self) -> None:
@@ -76,6 +161,13 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         # needing a reload.
         if entity_has_excluded_label(self.hass, entity_id, self._excluded_labels):
             return
+        # Per-automation, per-sensor exclusion (CONF_EXCLUDED_AUTOMATIONS) -
+        # narrower than a label: this automation only, only this sensor.
+        # Checked fresh on every trigger, same as the label check above,
+        # so an options change takes effect on the very next run without
+        # a reload.
+        if SCOPE_FAILED_AUTOMATIONS in self._excluded_automations.get(entity_id, []):
+            return
         self.hass.async_create_task(self._async_process_trigger(entity_id))
 
     async def _async_process_trigger(self, entity_id: str) -> None:
@@ -90,15 +182,30 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         aborted_step_had_error = self._step_had_error(trace, last_step)
 
         if is_execution_failure(script_execution, aborted_step_had_error=aborted_step_had_error):
-            self.data[entity_id] = {
-                "entity_id": entity_id,
-                "name": self._async_get_name(entity_id),
-                "unique_id": self._async_get_unique_id(entity_id),
-                "last_error_time": datetime.now().astimezone().isoformat(),
-                "error_message": self._build_error_message(trace, last_step),
-                "error_step": last_step or "unknown",
-            }
+            streak = self._streaks.get(entity_id, 0) + 1
+            self._streaks[entity_id] = streak
+            threshold = self._effective_streak_threshold(entity_id)
+            if streak >= threshold:
+                # Refreshed every time this fires, even if already
+                # flagged from an earlier failure in the same streak -
+                # keeps last_error_time/error_message current rather
+                # than frozen at whichever failure first crossed the
+                # threshold.
+                self.data[entity_id] = {
+                    "entity_id": entity_id,
+                    "name": self._async_get_name(entity_id),
+                    "unique_id": self._async_get_unique_id(entity_id),
+                    "last_error_time": datetime.now().astimezone().isoformat(),
+                    "error_message": self._build_error_message(trace, last_step),
+                    "error_step": last_step or "unknown",
+                    "consecutive_failures": streak,
+                }
+            # else: below threshold - tracked in _streaks, not yet
+            # surfaced in .data/the sensor. A threshold of 1 (default)
+            # always flags on this branch, same as before this feature
+            # existed.
         else:
+            self._streaks.pop(entity_id, None)
             self.data.pop(entity_id, None)
 
         self.async_set_updated_data(self.data)
@@ -111,7 +218,7 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         """The automation's config `id:` (stable across renames) - not its
         entity_id's object_id. Used to link straight to the automation
         editor (`/config/automation/edit/<unique_id>`) from the optional
-        persistent notification, see notifications.py. `None` if the
+        Repairs issue, see issues.py. `None` if the
         entity isn't in the registry for some reason - callers fall back
         to a less specific link rather than erroring."""
         registry_entry = er.async_get(self.hass).async_get(entity_id)

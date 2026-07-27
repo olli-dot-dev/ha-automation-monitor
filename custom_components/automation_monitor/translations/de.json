@@ -13,16 +13,46 @@
   "options": {
     "step": {
       "init": {
+        "menu_options": {
+          "general": "Allgemeine Einstellungen",
+          "entities": "Entitäten",
+          "automations": "Automationen"
+        }
+      },
+      "general": {
         "title": "Automation Monitor Einstellungen",
-        "description": "Wie lange eine von einer Automation oder einem Skript referenzierte Entität durchgehend nicht verfügbar sein muss, bevor sie markiert wird, welche Entitäten von dieser Prüfung komplett ausgeschlossen werden sollen, welche Labels die damit versehenen Automationen/Entitäten/Geräte komplett von der Überwachung ausschließen, ob aktuell deaktivierte Automationen übersprungen werden sollen, und ob für jeden Sensor eine dauerhafte Benachrichtigung angezeigt werden soll.",
+        "description": "Wie lange eine von einer Automation oder einem Skript referenzierte Entität durchgehend nicht verfügbar sein muss, bevor sie markiert wird, welche Labels die damit versehenen Automationen/Entitäten/Geräte komplett von der Überwachung ausschließen (immer beide Sensoren zugleich - für reine Entitäten- oder Automations-Einstellungen siehe die Menüpunkte „Entitäten“/„Automationen“), ob für jeden Sensor ein Repairs-Issue eröffnet werden soll (Einstellungen → Reparaturen, nur für Admins sichtbar), und wie viele aufeinanderfolgende Fehlschläge eine Automation braucht, bevor sie markiert wird.",
         "data": {
           "unavailable_threshold_minutes": "Schwellwert für nicht verfügbar (Minuten)",
-          "ignored_entities": "Ignorierte Entitäten (werden nie markiert)",
-          "excluded_labels": "Ausgeschlossene Labels (Automationen/Entitäten/Geräte)",
-          "exclude_off_automations": "Deaktivierte Automationen überspringen",
-          "notify_failed_automations": "Bei fehlgeschlagenen Automationen benachrichtigen",
-          "notify_linked_entities_unavailable": "Bei nicht verfügbaren verknüpften Entitäten benachrichtigen"
+          "excluded_labels": "Ausgeschlossene Labels (Automationen/Entitäten/Geräte, immer beide Sensoren)",
+          "notify_failed_automations": "Repairs-Issue bei fehlgeschlagenen Automationen eröffnen",
+          "notify_linked_entities_unavailable": "Repairs-Issue bei nicht verfügbaren verknüpften Entitäten eröffnen",
+          "failure_streak_threshold": "Schwellwert für aufeinanderfolgende Fehlschläge (bis zur Markierung)"
         }
+      },
+      "entities": {
+        "title": "Entitäten",
+        "description": "Einstellungen auf Entitäten-Ebene: welche Entitäten komplett vom Sensor „Nicht verfügbare verknüpfte Entitäten“ ausgeschlossen werden sollen, und welche Entitäten für den Sensor „Fehlgeschlagene Automationen“ einen eigenen Schwellenwert bekommen sollen (statt des globalen Defaults aus den Allgemeinen Einstellungen). Die Schwellenwerte werden auf dem nächsten Bildschirm eingegeben.",
+        "data": {
+          "ignored_entities": "Ignorierte Entitäten (betrifft nur den Sensor „Nicht verfügbare verknüpfte Entitäten“, werden nie markiert)",
+          "streak_override_entities": "Entitäten mit individuellem Schwellenwert"
+        }
+      },
+      "streak_overrides": {
+        "title": "Individueller Schwellenwert",
+        "description": "Unten erscheinen nur die Entitäten, die du auf dem vorherigen Bildschirm ausgewählt hast - sonst ändert sich hier nichts. Der eigene Schwellenwert je Entität: wie viele aufeinanderfolgende Fehlschläge eine Automation braucht, die diese Entität anspricht, bevor sie markiert wird."
+      },
+      "automations": {
+        "title": "Automationen",
+        "description": "Einstellungen auf Automations-Ebene: ob aktuell deaktivierte Automationen beim Aufbau der Linked-Entities-Referenzkarte übersprungen werden sollen, und welche Automationen nur von einem statt beiden Sensoren ausgeschlossen werden sollen (ein Label, Allgemeine Einstellungen, schließt immer von beiden aus). Die Ausschluss-Werte werden auf dem nächsten Bildschirm eingegeben.",
+        "data": {
+          "exclude_off_automations": "Deaktivierte Automationen überspringen",
+          "excluded_automations_entities": "Automationen mit individueller Sensor-Ausnahme"
+        }
+      },
+      "automation_exclusions": {
+        "title": "Automations-Ausschluss",
+        "description": "Unten erscheinen nur die Automationen, die du auf dem vorherigen Bildschirm ausgewählt hast - sonst ändert sich hier nichts. Für jede: von welchem/welchen Sensor(en) sie ausgeschlossen werden soll."
       }
     }
   },
@@ -34,6 +64,21 @@
       "linked_entities_unavailable": {
         "name": "Nicht verfügbare verknüpfte Entitäten"
       }
+    },
+    "update": {
+      "update": {
+        "name": "Automation Monitor"
+      }
+    }
+  },
+  "issues": {
+    "failed_automation": {
+      "title": "Automation fehlgeschlagen: {name}",
+      "description": "{editor_link} ist am Schritt `{error_step}` am {last_error_time} fehlgeschlagen.\n\n**Fehler:** {error_message}"
+    },
+    "linked_entity_unavailable": {
+      "title": "{name} nicht verfügbar",
+      "description": "{entity_link} (`{entity_id}`) ist seit {unavailable_since} nicht verfügbar.\n\n**Verwendet von:** {used_by}"
     }
   }
 }

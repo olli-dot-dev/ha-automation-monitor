@@ -58,15 +58,18 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_EXCLUDE_OFF_AUTOMATIONS,
+    CONF_EXCLUDED_AUTOMATIONS,
     CONF_EXCLUDED_LABELS,
     CONF_IGNORED_ENTITIES,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
     DEFAULT_EXCLUDE_OFF_AUTOMATIONS,
+    DEFAULT_EXCLUDED_AUTOMATIONS,
     DEFAULT_EXCLUDED_LABELS,
     DEFAULT_IGNORED_ENTITIES,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
     DOMAIN,
     LINKED_ENTITIES_REBUILD_INTERVAL_MINUTES,
+    SCOPE_LINKED_ENTITIES_UNAVAILABLE,
 )
 from .labels import entity_has_excluded_label
 from .linked_entities import (
@@ -329,6 +332,7 @@ def async_collect_source_entities(
     *,
     exclude_off_automations: bool = False,
     excluded_labels: set[str] | None = None,
+    excluded_automations: dict[str, list[str]] | None = None,
 ) -> dict[str, set[str]]:
     """Return {automation/script entity_id: {referenced entity_ids}} for
     every currently loaded automation and script.
@@ -339,8 +343,13 @@ def async_collect_source_entities(
     label-excluded automation/script (see CONF_EXCLUDED_LABELS) is
     skipped as a source entirely - its referenced entities simply aren't
     added to the map via it (still tracked if another, non-excluded
-    automation/script also references them)."""
+    automation/script also references them). `excluded_automations`
+    (CONF_EXCLUDED_AUTOMATIONS) does the same but per-automation and
+    per-sensor - automation domain only (never scripts, same as
+    exclude_off_automations - scripts weren't part of what was asked
+    for), skipped only if this sensor's scope is in its list."""
     excluded_labels = excluded_labels or set()
+    excluded_automations = excluded_automations or {}
     source: dict[str, set[str]] = {}
     for domain in _TRACKED_DOMAINS:
         for entity_id in hass.states.async_entity_ids(domain):
@@ -348,6 +357,10 @@ def async_collect_source_entities(
                 state = hass.states.get(entity_id)
                 if state is not None and state.state == "off":
                     continue
+            if domain == "automation" and SCOPE_LINKED_ENTITIES_UNAVAILABLE in excluded_automations.get(
+                entity_id, []
+            ):
+                continue
             if entity_has_excluded_label(hass, entity_id, excluded_labels):
                 continue
             try:
@@ -368,6 +381,7 @@ def async_build_reference_map(
     *,
     exclude_off_automations: bool = False,
     excluded_labels: set[str] | None = None,
+    excluded_automations: dict[str, list[str]] | None = None,
 ) -> dict[str, list[str]]:
     """HA-touching half of the reference-map build: collect + invert in
     one call. See linked_entities.build_reference_map for the pure half.
@@ -384,6 +398,7 @@ def async_build_reference_map(
         hass,
         exclude_off_automations=exclude_off_automations,
         excluded_labels=excluded_labels,
+        excluded_automations=excluded_automations,
     )
     ignored = set(ignored or ())
     if excluded_labels:
@@ -444,6 +459,12 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
             self._entry.options.get(CONF_EXCLUDED_LABELS, DEFAULT_EXCLUDED_LABELS)
         )
 
+    @property
+    def _excluded_automations(self) -> dict[str, list[str]]:
+        return self._entry.options.get(
+            CONF_EXCLUDED_AUTOMATIONS, DEFAULT_EXCLUDED_AUTOMATIONS
+        )
+
     @callback
     def async_setup(self) -> None:
         self._unsubs.append(
@@ -492,6 +513,7 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
             self._ignored_entities,
             exclude_off_automations=exclude_off_automations,
             excluded_labels=self._excluded_labels,
+            excluded_automations=self._excluded_automations,
         )
         old_tracked = set(self._reference_map)
         new_tracked = set(new_map)
@@ -653,10 +675,10 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
         """Name/unique_id/domain for one automation/script referencing a
         flagged entity - kept separate from the plain `referenced_by`
         entity_id list (unchanged, still what the sensor attribute and
-        the README's example Markdown card use) so the persistent
-        notification (see notifications.py, which links each source
-        straight to its editor) can be enriched without changing that
-        existing, documented attribute shape."""
+        the README's example Markdown card use) so the Repairs issue
+        (see issues.py, which links each source straight to its editor)
+        can be enriched without changing that existing, documented
+        attribute shape."""
         state = self.hass.states.get(source_entity_id)
         registry_entry = er.async_get(self.hass).async_get(source_entity_id)
         return {

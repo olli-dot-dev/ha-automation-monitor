@@ -13,16 +13,46 @@
   "options": {
     "step": {
       "init": {
+        "menu_options": {
+          "general": "General settings",
+          "entities": "Entities",
+          "automations": "Automations"
+        }
+      },
+      "general": {
         "title": "Automation Monitor options",
-        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which entities to exclude from this check entirely, which labels exclude the automations/entities/devices carrying them from monitoring entirely, whether to skip currently turned-off automations, and whether to show a persistent notification for each sensor.",
+        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which labels exclude the automations/entities/devices carrying them from monitoring entirely (both sensors at once - for entity-only or automation-only settings, see the \"Entities\"/\"Automations\" menu items instead), whether to open a Repairs issue for each sensor (Settings -> Repairs, admin-only), and how many consecutive failures an automation needs before it's flagged.",
         "data": {
           "unavailable_threshold_minutes": "Unavailable threshold (minutes)",
-          "ignored_entities": "Ignored entities (never flagged)",
-          "excluded_labels": "Excluded labels (automations/entities/devices)",
-          "exclude_off_automations": "Skip automations that are turned off",
-          "notify_failed_automations": "Notify on failed automations",
-          "notify_linked_entities_unavailable": "Notify on unavailable linked entities"
+          "excluded_labels": "Excluded labels (automations/entities/devices, both sensors at once)",
+          "notify_failed_automations": "Open a Repairs issue for failed automations",
+          "notify_linked_entities_unavailable": "Open a Repairs issue for unavailable linked entities",
+          "failure_streak_threshold": "Failure streak threshold (consecutive failures before flagging)"
         }
+      },
+      "entities": {
+        "title": "Entities",
+        "description": "Entity-level settings: which entities to exclude entirely from the \"Linked entities unavailable\" sensor, and which entities need their own streak threshold (instead of the global default from General settings) for the \"Failed automations\" sensor. Streak-threshold values are entered on the next screen.",
+        "data": {
+          "ignored_entities": "Ignored entities (only affects the \"Linked entities unavailable\" sensor, never flagged)",
+          "streak_override_entities": "Entities with an individual streak threshold"
+        }
+      },
+      "streak_overrides": {
+        "title": "Individual streak threshold",
+        "description": "Only the entities picked on the previous screen appear below - nothing else changes here. Each entity's own streak threshold: how many consecutive failures an automation touching this entity needs before it's flagged."
+      },
+      "automations": {
+        "title": "Automations",
+        "description": "Automation-level settings: whether to skip currently turned-off automations when building the linked-entities reference map, and which automations need to be excluded from just one sensor instead of both (a label, General settings, always excludes from both). Exclusion values are entered on the next screen.",
+        "data": {
+          "exclude_off_automations": "Skip automations that are turned off",
+          "excluded_automations_entities": "Automations with individual per-sensor exclusion"
+        }
+      },
+      "automation_exclusions": {
+        "title": "Automation exclusion",
+        "description": "Only the automations picked on the previous screen appear below - nothing else changes here. For each: which sensor(s) it should be excluded from."
       }
     }
   },
@@ -34,6 +64,21 @@
       "linked_entities_unavailable": {
         "name": "Linked entities unavailable"
       }
+    },
+    "update": {
+      "update": {
+        "name": "Automation Monitor"
+      }
+    }
+  },
+  "issues": {
+    "failed_automation": {
+      "title": "Automation failed: {name}",
+      "description": "{editor_link} failed at step `{error_step}` on {last_error_time}.\n\n**Error:** {error_message}"
+    },
+    "linked_entity_unavailable": {
+      "title": "{name} unavailable",
+      "description": "{entity_link} (`{entity_id}`) has been unavailable since {unavailable_since}.\n\n**Used by:** {used_by}"
     }
   }
 }

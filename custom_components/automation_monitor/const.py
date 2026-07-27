@@ -1,7 +1,7 @@
 """Constants for Automation Monitor."""
 
 DOMAIN = "automation_monitor"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "update"]
 
 EVENT_AUTOMATION_TRIGGERED = "automation_triggered"
 
@@ -23,21 +23,32 @@ DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES = 15
 CONF_IGNORED_ENTITIES = "ignored_entities"
 DEFAULT_IGNORED_ENTITIES: list[str] = []
 
-# Options flow: opt-in persistent notifications (HA's built-in in-UI
-# notification, not a push/mobile notification), one toggle per sensor so
-# either can be enabled independently - see notifications.py / __init__.py.
-# Off by default: keeps the MVP's "detection only, no notifications"
+# Options flow: opt-in Repairs issues (Settings -> Repairs, admin-only -
+# see issues.py / __init__.py), one toggle per sensor so either can be
+# enabled independently. Off by default: keeps the MVP's "detection only"
 # behaviour unless a user explicitly asks for it.
+#
+# Was a persistent_notification (the bell-icon card) through v0.7.x -
+# replaced because persistent_notification.async_create() has no
+# per-user/admin concept at all (verified against the real HA core
+# source, homeassistant/components/persistent_notification/__init__.py:
+# it broadcasts globally to every connected client via a shared
+# dispatcher, no user targeting parameter exists). A real user reported
+# (2026-07-27) that non-admin household members were seeing these, which
+# isn't appropriate for what is fundamentally an admin/maintenance
+# concern. The Repairs system is admin-only by design instead.
 CONF_NOTIFY_FAILED_AUTOMATIONS = "notify_failed_automations"
 CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE = "notify_linked_entities_unavailable"
 DEFAULT_NOTIFY = False
 
-# Fixed persistent_notification IDs (one per sensor) so re-creating one
-# updates/replaces the existing card in place instead of piling up
-# duplicates, and so it can be looked up again to dismiss it (toggle turned
-# off, or the integration unloaded).
-NOTIFICATION_ID_FAILED_AUTOMATIONS = f"{DOMAIN}_failed_automations"
-NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE = f"{DOMAIN}_linked_entities_unavailable"
+# issue_registry issue_id prefixes (see issues.py) - one issue per
+# currently-failed automation / currently-unavailable linked entity
+# (`f"{prefix}:{entity_id}"`), not one combined issue per sensor. Matches
+# how the Repairs page already presents multiple issues as separate,
+# individually-dismissible rows - a better fit than persistent
+# notification's old single-card-with-many-lines approach.
+ISSUE_PREFIX_FAILED_AUTOMATION = "failed_automation"
+ISSUE_PREFIX_LINKED_ENTITY_UNAVAILABLE = "linked_entity_unavailable"
 
 # Options flow: skip automations that are currently turned off (state
 # "off" - their own on/off toggle, e.g. Settings -> Automations, or
@@ -73,6 +84,57 @@ DEFAULT_EXCLUDE_OFF_AUTOMATIONS = False
 #   entities, not just ones labeled individually. See labels.py.
 CONF_EXCLUDED_LABELS = "excluded_labels"
 DEFAULT_EXCLUDED_LABELS: list[str] = []
+
+# Options flow: how many consecutive failed runs an automation needs
+# before it's flagged by sensor.failed_automations - default 1 preserves
+# the original "flag on the very first failure" behaviour. Requested by a
+# real user (forum feedback, 2026-07-27) whose Zigbee mesh occasionally
+# times out ("device did not respond") on the first attempt but succeeds
+# on a retry - a single one-off blip isn't a real problem worth flagging,
+# but a *repeated* failure still is. See coordinator.py.
+CONF_FAILURE_STREAK_THRESHOLD = "failure_streak_threshold"
+DEFAULT_FAILURE_STREAK_THRESHOLD = 1
+
+# Options flow: per-entity override of the streak threshold above, e.g. a
+# specific Zigbee device known to be flakier than the rest of the mesh
+# and deserving more tolerance than the global default. {entity_id: int}.
+# Matched by direct entity_id references only (HA's own
+# entities_in_automation - triggers/conditions/actions), not via
+# device/area targets the way linked_entities_coordinator.py's fuller
+# resolution does - a deliberate scope cut, see coordinator.py
+# `_effective_streak_threshold` docstring. Configured via a two-step
+# options flow (pick entities in step "init", enter each one's threshold
+# in step "overrides") since HA's selectors have no single widget for
+# "list of entity+number pairs" - see config_flow.py.
+CONF_ENTITY_STREAK_OVERRIDES = "entity_streak_overrides"
+DEFAULT_ENTITY_STREAK_OVERRIDES: dict[str, int] = {}
+
+# Options flow: per-automation, per-sensor exclusion - {entity_id:
+# [scope, ...]} where scope is one of the SCOPE_* values below. Separate
+# from CONF_EXCLUDED_LABELS (which always excludes from *both* sensors at
+# once): requested specifically so one automation can be excluded from
+# only one sensor, e.g. a known-flaky automation excluded from
+# failed_automations while its referenced entities are still tracked by
+# linked_entities_unavailable (other automations may reference the same
+# entities). Same two-step options flow mechanism as
+# CONF_ENTITY_STREAK_OVERRIDES above - see config_flow.py.
+CONF_EXCLUDED_AUTOMATIONS = "excluded_automations"
+DEFAULT_EXCLUDED_AUTOMATIONS: dict[str, list[str]] = {}
+
+SCOPE_FAILED_AUTOMATIONS = "failed_automations"
+SCOPE_LINKED_ENTITIES_UNAVAILABLE = "linked_entities_unavailable"
+EXCLUSION_SCOPES = [SCOPE_FAILED_AUTOMATIONS, SCOPE_LINKED_ENTITIES_UNAVAILABLE]
+
+# Update entity: checks this repo's GitHub Releases for a newer version
+# than what's installed. Not published to the default HACS store (see
+# README Installation), so HACS never creates its own update.* entity for
+# it the way it does for its own app or default-store integrations -
+# confirmed absent on a live instance (only update.hacs_update existed,
+# nothing per-repository). This entity fills that specific gap; it only
+# detects and links to the release, it never installs anything itself -
+# same "detect and expose, don't act" scope as the two sensors.
+GITHUB_REPO = "olli-dot-dev/ha-automation-monitor"
+UPDATE_CHECK_INTERVAL_HOURS = 12
 
 # How often to rebuild the automation/script -> referenced-entity map as a
 # safety net, since there is no HA event for "a script's content changed"

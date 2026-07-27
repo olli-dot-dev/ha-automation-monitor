@@ -13,16 +13,46 @@
   "options": {
     "step": {
       "init": {
+        "menu_options": {
+          "general": "Ajustes generales",
+          "entities": "Entidades",
+          "automations": "Automatizaciones"
+        }
+      },
+      "general": {
         "title": "Opciones de Automation Monitor",
-        "description": "Durante cuánto tiempo una entidad referenciada por una automatización o script debe permanecer continuamente no disponible antes de ser marcada, qué entidades excluir por completo de esta comprobación, qué etiquetas excluyen por completo de la monitorización a las automatizaciones/entidades/dispositivos que las llevan, si se deben omitir las automatizaciones actualmente desactivadas, y si se debe mostrar una notificación persistente para cada sensor.",
+        "description": "Durante cuánto tiempo una entidad referenciada por una automatización o script debe permanecer continuamente no disponible antes de ser marcada, qué etiquetas excluyen por completo de la monitorización a las automatizaciones/entidades/dispositivos que las llevan (siempre ambos sensores a la vez - para ajustes propios de entidades o automatizaciones, ve a los elementos de menú «Entidades»/«Automatizaciones»), si se debe abrir un aviso de Reparaciones para cada sensor (Ajustes -> Reparaciones, solo visible para administradores), y cuántos fallos consecutivos necesita una automatización antes de ser marcada.",
         "data": {
           "unavailable_threshold_minutes": "Umbral de no disponibilidad (minutos)",
-          "ignored_entities": "Entidades ignoradas (nunca marcadas)",
-          "excluded_labels": "Etiquetas excluidas (automatizaciones/entidades/dispositivos)",
-          "exclude_off_automations": "Omitir automatizaciones desactivadas",
-          "notify_failed_automations": "Notificar automatizaciones fallidas",
-          "notify_linked_entities_unavailable": "Notificar entidades vinculadas no disponibles"
+          "excluded_labels": "Etiquetas excluidas (automatizaciones/entidades/dispositivos, siempre ambos sensores)",
+          "notify_failed_automations": "Abrir un aviso de Reparaciones para automatizaciones fallidas",
+          "notify_linked_entities_unavailable": "Abrir un aviso de Reparaciones para entidades vinculadas no disponibles",
+          "failure_streak_threshold": "Umbral de fallos consecutivos (antes de marcar)"
         }
+      },
+      "entities": {
+        "title": "Entidades",
+        "description": "Ajustes a nivel de entidad: qué entidades excluir por completo del sensor «Entidades vinculadas no disponibles», y qué entidades necesitan su propio umbral (en lugar del valor predeterminado global de Ajustes generales) para el sensor «Automatizaciones fallidas». Los valores de umbral se introducen en la siguiente pantalla.",
+        "data": {
+          "ignored_entities": "Entidades ignoradas (solo afecta al sensor «Entidades vinculadas no disponibles», nunca marcadas)",
+          "streak_override_entities": "Entidades con umbral individual"
+        }
+      },
+      "streak_overrides": {
+        "title": "Umbral individual",
+        "description": "Abajo solo aparecen las entidades seleccionadas en la pantalla anterior; nada más cambia aquí. El umbral propio de cada entidad: cuántos fallos consecutivos necesita una automatización que la usa antes de ser marcada."
+      },
+      "automations": {
+        "title": "Automatizaciones",
+        "description": "Ajustes a nivel de automatización: si se deben omitir las automatizaciones actualmente desactivadas al construir el mapa de referencias de entidades vinculadas, y qué automatizaciones deben excluirse de un solo sensor en lugar de ambos (una etiqueta, Ajustes generales, siempre excluye de ambos). Los valores de exclusión se introducen en la siguiente pantalla.",
+        "data": {
+          "exclude_off_automations": "Omitir automatizaciones desactivadas",
+          "excluded_automations_entities": "Automatizaciones con exclusión individual por sensor"
+        }
+      },
+      "automation_exclusions": {
+        "title": "Exclusión de automatización",
+        "description": "Abajo solo aparecen las automatizaciones seleccionadas en la pantalla anterior; nada más cambia aquí. Para cada una: de qué sensor(es) debe excluirse."
       }
     }
   },
@@ -34,6 +64,21 @@
       "linked_entities_unavailable": {
         "name": "Entidades vinculadas no disponibles"
       }
+    },
+    "update": {
+      "update": {
+        "name": "Automation Monitor"
+      }
+    }
+  },
+  "issues": {
+    "failed_automation": {
+      "title": "Automatización fallida: {name}",
+      "description": "{editor_link} falló en el paso `{error_step}` el {last_error_time}.\n\n**Error:** {error_message}"
+    },
+    "linked_entity_unavailable": {
+      "title": "{name} no disponible",
+      "description": "{entity_link} (`{entity_id}`) no está disponible desde {unavailable_since}.\n\n**Usado por:** {used_by}"
     }
   }
 }

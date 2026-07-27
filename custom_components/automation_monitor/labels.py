@@ -1,7 +1,7 @@
 """Label-based exclusion check, shared by both coordinators.
 
 HA-touching (needs entity_registry/device_registry) - unlike
-classification.py/linked_entities.py/notifications.py, not unit-tested
+classification.py/linked_entities.py/issues.py, not unit-tested
 directly here, same category as coordinator.py/
 linked_entities_coordinator.py (verify live instead).
 

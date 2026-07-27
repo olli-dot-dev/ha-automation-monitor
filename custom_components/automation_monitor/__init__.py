@@ -8,10 +8,11 @@ import logging
 from dataclasses import dataclass
 
 import voluptuous as vol
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.loader import async_get_integration
 
 from .const import (
     ATTR_ENTITY_ID,
@@ -19,21 +20,16 @@ from .const import (
     CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
     DEFAULT_NOTIFY,
     DOMAIN,
-    NOTIFICATION_ID_FAILED_AUTOMATIONS,
-    NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE,
+    ISSUE_PREFIX_FAILED_AUTOMATION,
+    ISSUE_PREFIX_LINKED_ENTITY_UNAVAILABLE,
     PLATFORMS,
     SERVICE_REBUILD_LINKED_ENTITIES,
     SERVICE_RESET,
 )
 from .coordinator import AutomationMonitorCoordinator
+from .issues import failed_automation_placeholders, linked_entity_placeholders
 from .linked_entities_coordinator import LinkedEntitiesCoordinator
-from .notifications import (
-    SUPPORTED_LANGUAGES,
-    build_failed_automations_message,
-    build_linked_entities_message,
-    failed_automations_title,
-    linked_entities_title,
-)
+from .update_coordinator import UpdateCheckCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,29 +38,16 @@ RESET_SERVICE_SCHEMA = vol.Schema({
 })
 
 
-def _notification_language(hass: HomeAssistant) -> str:
-    """Resolve `hass.config.language` (HA's own system-language setting
-    under Settings -> System -> General; normally a plain 2-letter code
-    like "de", but split on "-"/"_" defensively in case it's ever a full
-    locale like "de-DE") down to one of notifications.SUPPORTED_LANGUAGES,
-    falling back to English for anything not (yet) translated - see
-    notifications.py for why this can't just be handled by HA's own
-    strings.json/translations mechanism."""
-    language = (hass.config.language or "en").lower()
-    short = language.replace("_", "-").split("-")[0]
-    if short in SUPPORTED_LANGUAGES:
-        return short
-    return "en"
-
-
 @dataclass
 class AutomationMonitorRuntimeData:
-    """Everything this config entry needs at runtime - both sensors'
-    coordinators, kept fully independent of each other (see
+    """Everything this config entry needs at runtime - all coordinators,
+    kept fully independent of each other (see
     linked_entities_coordinator.py docstring for why)."""
 
     failures: AutomationMonitorCoordinator
     linked_entities: LinkedEntitiesCoordinator
+    update_check: UpdateCheckCoordinator
+    installed_version: str
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -74,73 +57,96 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     linked_entities_coordinator = LinkedEntitiesCoordinator(hass, entry)
     linked_entities_coordinator.async_setup()
 
+    integration = await async_get_integration(hass, DOMAIN)
+    update_coordinator = UpdateCheckCoordinator(hass)
+    # First refresh happens right away rather than waiting up to
+    # UPDATE_CHECK_INTERVAL_HOURS for the first result - a fresh install
+    # or restart shouldn't have to wait hours to know whether it's already
+    # out of date. A failure here (GitHub unreachable) leaves
+    # coordinator.data at None rather than raising, same as any other
+    # DataUpdateCoordinator refresh failure - the entity reports itself
+    # unavailable (see update.py) instead of blocking setup.
+    await update_coordinator.async_refresh()
+
     runtime_data = AutomationMonitorRuntimeData(
-        failures=failures_coordinator, linked_entities=linked_entities_coordinator
+        failures=failures_coordinator,
+        linked_entities=linked_entities_coordinator,
+        update_check=update_coordinator,
+        # integration.version is an AwesomeVersion (a str subclass with its
+        # own __eq__ that chokes on non-version-like values, e.g. HA's
+        # entity-attribute-caching sentinel) - cast to a plain str so
+        # `_attr_installed_version` never crashes entity setup.
+        # Live-verified on .208: raised "Not a valid AwesomeVersion object"
+        # in homeassistant.helpers.entity._setter without this cast.
+        installed_version=str(integration.version) if integration.version else "0.0.0",
     )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime_data
+    entry.async_on_unload(update_coordinator.async_shutdown)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
-    # Optional persistent notifications - one toggle per sensor (see
-    # const.py). Re-derives the whole message from the coordinator's
-    # current data on every update rather than diffing, same
+    # Optional Repairs issues (Settings -> Repairs, admin-only) - one
+    # toggle per sensor (see const.py). Re-derives the whole set of
+    # wanted issue_ids from the coordinator's current data on every
+    # update rather than tracking a diff across calls, same
     # reflects-current-state approach as the sensors themselves; see
-    # notifications.py docstring for why re-creating under a fixed
-    # notification_id is safe (updates in place, no duplicates).
+    # _sync_issues for how that translates into
+    # create/update/delete calls against the issue registry.
     @callback
-    def _update_failed_automations_notification() -> None:
-        lang = _notification_language(hass)
-        _async_sync_notification(
+    def _update_failed_automations_issues() -> None:
+        _sync_issues(
             hass,
+            prefix=ISSUE_PREFIX_FAILED_AUTOMATION,
             enabled=entry.options.get(CONF_NOTIFY_FAILED_AUTOMATIONS, DEFAULT_NOTIFY),
-            notification_id=NOTIFICATION_ID_FAILED_AUTOMATIONS,
-            title=failed_automations_title(lang),
-            message=build_failed_automations_message(failures_coordinator.data, lang),
+            current={
+                entity_id: failed_automation_placeholders(info)
+                for entity_id, info in failures_coordinator.data.items()
+            },
+            translation_key=ISSUE_PREFIX_FAILED_AUTOMATION,
         )
 
     @callback
-    def _update_linked_entities_notification() -> None:
-        lang = _notification_language(hass)
-        _async_sync_notification(
+    def _update_linked_entities_issues() -> None:
+        _sync_issues(
             hass,
+            prefix=ISSUE_PREFIX_LINKED_ENTITY_UNAVAILABLE,
             enabled=entry.options.get(
                 CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE, DEFAULT_NOTIFY
             ),
-            notification_id=NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE,
-            title=linked_entities_title(lang),
-            message=build_linked_entities_message(linked_entities_coordinator.data, lang),
+            current={
+                entity_id: linked_entity_placeholders(info)
+                for entity_id, info in linked_entities_coordinator.data.items()
+            },
+            translation_key=ISSUE_PREFIX_LINKED_ENTITY_UNAVAILABLE,
         )
 
     entry.async_on_unload(
-        failures_coordinator.async_add_listener(_update_failed_automations_notification)
+        failures_coordinator.async_add_listener(_update_failed_automations_issues)
     )
     entry.async_on_unload(
-        linked_entities_coordinator.async_add_listener(_update_linked_entities_notification)
+        linked_entities_coordinator.async_add_listener(_update_linked_entities_issues)
     )
-    # Sync both notifications to the coordinators' current state right away,
+    # Sync both issue sets to the coordinators' current state right away,
     # not just on the next update: a coordinator's `.data` is set directly
     # rather than via `async_set_updated_data()` at construction time (see
     # coordinator.py / linked_entities_coordinator.py `__init__`), so the
     # listeners above never fire on setup itself. Without this, an options
     # save (which reloads the whole config entry - see
     # `_async_options_updated`) silently resets both coordinators to empty
-    # while leaving any already-shown notification stale/orphaned - visibly
-    # wrong once a real failure/unavailable entity had been reported before
-    # the reload. Found via live testing on 2026-07-26: the failed
+    # while leaving any already-open issue stale/orphaned - visibly wrong
+    # once a real failure/unavailable entity had been reported before the
+    # reload. Found via live testing on 2026-07-26 against the old
+    # persistent-notification version of this same mechanism (the failed
     # automations sensor read 0 right after an options save, but the
-    # persistent notification still showed the pre-reload failure.
-    _update_failed_automations_notification()
-    _update_linked_entities_notification()
+    # notification still showed the pre-reload failure) - applies equally
+    # here.
+    _update_failed_automations_issues()
+    _update_linked_entities_issues()
 
     async def _async_handle_reset(call: ServiceCall) -> None:
-        target_entity_id = call.data.get(ATTR_ENTITY_ID)
-        if target_entity_id:
-            failures_coordinator.data.pop(target_entity_id, None)
-        else:
-            failures_coordinator.data.clear()
-        failures_coordinator.async_set_updated_data(failures_coordinator.data)
+        failures_coordinator.reset(call.data.get(ATTR_ENTITY_ID))
 
     async def _async_handle_rebuild_linked_entities(call: ServiceCall) -> None:
         await linked_entities_coordinator.async_rebuild()
@@ -159,52 +165,64 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 @callback
-def _async_sync_notification(
+def _sync_issues(
     hass: HomeAssistant,
     *,
+    prefix: str,
     enabled: bool,
-    notification_id: str,
-    title: str,
-    message: str,
+    current: dict[str, dict[str, str]],
+    translation_key: str,
 ) -> None:
-    """Show or clear one persistent notification. Re-creating under the
-    same notification_id updates the existing card in place instead of
-    piling up duplicates. Dismissed (not just left stale) whenever the
-    toggle is off or there's currently nothing to report - a disabled
-    toggle must actually clear an already-shown notification, not just
-    stop refreshing it.
+    """Reconcile one sensor's set of Repairs issues (all issue_ids under
+    this domain starting with `f"{prefix}:"`) against `current` - one
+    issue per currently-failed automation / currently-unavailable linked
+    entity, keyed by `f"{prefix}:{entity_id}"`. Unlike the old single
+    persistent-notification-per-sensor approach, this needs an actual
+    diff: entities no longer in `current` get their issue deleted,
+    everything still/newly in `current` gets created-or-updated
+    (`async_create_issue` replaces an existing issue under the same
+    issue_id in place, same "safe to call every time" property the old
+    notification_id re-creation had). `enabled=False` clears every issue
+    under this prefix regardless of `current` - a disabled toggle must
+    actually clear already-open issues, not just stop refreshing them.
 
     This runs as a coordinator listener (see async_setup_entry), called
     synchronously and unwrapped by HA's own coordinator update path - an
-    uncaught exception here wouldn't just skip the notification, it could
+    uncaught exception here wouldn't just skip the issue sync, it could
     propagate out through async_set_updated_data into whatever triggered
     the update (a state change, a rebuild, the reset service...) and fail
-    that too, silently as far as the notification itself is concerned.
-    Caught and logged explicitly so a notification bug can never take
-    detection down with it, and so it's actually visible in the log
-    instead of just "the card didn't show up" with no trace."""
+    that too, silently as far as the issue itself is concerned. Caught
+    and logged explicitly so an issue-sync bug can never take detection
+    down with it, and so it's actually visible in the log instead of just
+    "the Repairs entry didn't show up" with no trace."""
     try:
-        if enabled and message:
-            _LOGGER.debug(
-                "Creating/updating persistent notification %s (%d chars)",
-                notification_id,
-                len(message),
-            )
-            persistent_notification.async_create(
-                hass, message, title=title, notification_id=notification_id
-            )
-        else:
-            _LOGGER.debug(
-                "Dismissing persistent notification %s (enabled=%s, has_message=%s)",
-                notification_id,
-                enabled,
-                bool(message),
-            )
-            persistent_notification.async_dismiss(hass, notification_id)
+        issue_registry = ir.async_get(hass)
+        existing_ids = {
+            issue_id
+            for (domain, issue_id) in issue_registry.issues
+            if domain == DOMAIN and issue_id.startswith(f"{prefix}:")
+        }
+        wanted_ids = {f"{prefix}:{entity_id}" for entity_id in current} if enabled else set()
+
+        for issue_id in existing_ids - wanted_ids:
+            _LOGGER.debug("Deleting Repairs issue %s", issue_id)
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+        if enabled:
+            for entity_id, placeholders in current.items():
+                issue_id = f"{prefix}:{entity_id}"
+                _LOGGER.debug("Creating/updating Repairs issue %s", issue_id)
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key=translation_key,
+                    translation_placeholders=placeholders,
+                )
     except Exception:  # noqa: BLE001 - see docstring: must never break the coordinator update
-        _LOGGER.exception(
-            "Failed to sync persistent notification %s", notification_id
-        )
+        _LOGGER.exception("Failed to sync Repairs issues for prefix %s", prefix)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -215,13 +233,15 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # Deliberately does NOT touch the persistent notifications here - this
-    # runs on every reload (including the options-update reload above),
-    # not just on an actual removal. Dismissing them here made a saved
-    # options change silently wipe an active notification even though
-    # nothing about what it reported had actually changed. Real
-    # remove-for-good cleanup lives in async_remove_entry instead, which
-    # HA only calls when the config entry is actually being deleted.
+    # Deliberately does NOT touch open Repairs issues here - this runs on
+    # every reload (including the options-update reload above), not just
+    # on an actual removal. Clearing them here made a saved options
+    # change silently wipe active issues even though nothing about what
+    # they reported had actually changed (this was a real bug in the
+    # persistent-notification version of this mechanism, fixed in
+    # v0.7.2 - same failure shape would apply here). Real remove-for-good
+    # cleanup lives in async_remove_entry instead, which HA only calls
+    # when the config entry is actually being deleted.
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         runtime_data: AutomationMonitorRuntimeData = hass.data[DOMAIN].pop(entry.entry_id)
@@ -234,9 +254,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # Called once the config entry is actually being deleted (after a
-    # successful async_unload_entry) - not on a reload. Don't leave a
-    # stale notification behind once the integration that owns it is gone.
-    persistent_notification.async_dismiss(hass, NOTIFICATION_ID_FAILED_AUTOMATIONS)
-    persistent_notification.async_dismiss(
-        hass, NOTIFICATION_ID_LINKED_ENTITIES_UNAVAILABLE
-    )
+    # successful async_unload_entry) - not on a reload. Don't leave stale
+    # Repairs issues behind once the integration that owns them is gone.
+    issue_registry = ir.async_get(hass)
+    for domain, issue_id in list(issue_registry.issues):
+        if domain == DOMAIN:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
