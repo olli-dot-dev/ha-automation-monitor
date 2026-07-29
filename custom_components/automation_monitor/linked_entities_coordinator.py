@@ -90,8 +90,8 @@ _LOGGER = logging.getLogger(__name__)
 # so, the periodic fallback can be dropped.
 EVENT_AUTOMATION_RELOADED = "automation_reloaded"
 
-_TRACKED_DOMAINS = ("automation", "script")
-_TRACKED_ENTITY_PREFIXES = ("automation.", "script.")
+_TRACKED_DOMAINS = ("automation", "script", "scene")
+_TRACKED_ENTITY_PREFIXES = ("automation.", "script.", "scene.")
 
 
 def _extract_target_ids(data: Any, key: str) -> list[str]:
@@ -245,20 +245,24 @@ def _action_sequence_for(
 
 
 def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -> set[str]:
-    """Return every entity_id referenced by one automation/script,
-    including ones reached only via a device or area target.
+    """Return every entity_id referenced by one automation/script/scene,
+    including ones an automation/script reaches only via a device or
+    area target.
 
     Verified against the installed Home Assistant source
     (homeassistant/components/automation/__init__.py,
     homeassistant/components/script/__init__.py,
+    homeassistant/components/homeassistant/scene.py,
     homeassistant/helpers/script.py, homeassistant/components/search/
     __init__.py - all checked against 2026.7.4) - re-verify against a
     live instance before relying on this, per this project's convention:
 
-    - `entities_in_automation`/`entities_in_script` (direct, literal
-      entity_id references from anywhere - triggers, conditions,
-      actions) are reused as-is - always a deliberate, correct
-      reference regardless of domain.
+    - `entities_in_automation`/`entities_in_script`/`entities_in_scene`
+      (direct, literal entity_id references from anywhere - triggers,
+      conditions, actions for automation/script; the flat
+      `entities:`/`snapshot_entities:` mapping for a scene) are reused
+      as-is - always a deliberate, correct reference regardless of
+      domain.
     - Device/area targets are deliberately NOT resolved the
       domain-agnostic way HA's own `devices_in_automation`/
       `areas_in_automation` (and script equivalents) do it - those just
@@ -280,7 +284,10 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
       itself (service-call/device-automation steps only, not
       conditions/triggers) pairing each area_id/device_id target with
       the domain of the action it came from; only entities of that same
-      domain in the area/device are then added as referenced.
+      domain in the area/device are then added as referenced. Not
+      applicable to scenes at all - a scene has no action sequence, no
+      device/area targets, just the flat entity mapping already covered
+      by `entities_in_scene` above, so scenes return early below.
     - Templated entity_id/device_id/area_id targets, and a templated
       whole `action:` string, are not resolvable statically either way -
       skipped, not guessed. Same static-analysis limit Watchman already
@@ -291,12 +298,19 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
         from homeassistant.components.automation import entities_in_automation
 
         direct = entities_in_automation(hass, entity_id)
-    else:
+    elif domain == "script":
         from homeassistant.components.script import entities_in_script
 
         direct = entities_in_script(hass, entity_id)
+    else:  # scene
+        from homeassistant.components.homeassistant.scene import entities_in_scene
+
+        direct = entities_in_scene(hass, entity_id)
 
     referenced: set[str] = set(direct)
+
+    if domain == "scene":
+        return referenced
 
     sequence = _action_sequence_for(hass, domain, entity_id)
     area_targets, device_targets = _domain_scoped_targets(sequence)
@@ -334,20 +348,22 @@ def async_collect_source_entities(
     excluded_labels: set[str] | None = None,
     excluded_automations: dict[str, list[str]] | None = None,
 ) -> dict[str, set[str]]:
-    """Return {automation/script entity_id: {referenced entity_ids}} for
-    every currently loaded automation and script.
+    """Return {automation/script/scene entity_id: {referenced entity_ids}}
+    for every currently loaded automation, script, and scene.
 
-    `exclude_off_automations` only ever skips automations, never scripts -
-    see CONF_EXCLUDE_OFF_AUTOMATIONS in const.py for why a script's "off"
-    state can't be treated the same way (idle, not disabled). A
-    label-excluded automation/script (see CONF_EXCLUDED_LABELS) is
-    skipped as a source entirely - its referenced entities simply aren't
-    added to the map via it (still tracked if another, non-excluded
-    automation/script also references them). `excluded_automations`
-    (CONF_EXCLUDED_AUTOMATIONS) does the same but per-automation and
-    per-sensor - automation domain only (never scripts, same as
-    exclude_off_automations - scripts weren't part of what was asked
-    for), skipped only if this sensor's scope is in its list."""
+    `exclude_off_automations` only ever skips automations, never scripts
+    or scenes - see CONF_EXCLUDE_OFF_AUTOMATIONS in const.py for why a
+    script's "off" state can't be treated the same way (idle, not
+    disabled); scenes have no on/off concept at all (activating one
+    doesn't leave it "on"). A label-excluded automation/script/scene
+    (see CONF_EXCLUDED_LABELS) is skipped as a source entirely - its
+    referenced entities simply aren't added to the map via it (still
+    tracked if another, non-excluded source also references them).
+    `excluded_automations` (CONF_EXCLUDED_AUTOMATIONS) does the same but
+    per-automation and per-sensor - automation domain only (never
+    scripts or scenes, same as exclude_off_automations - neither was
+    part of what was asked for), skipped only if this sensor's scope is
+    in its list."""
     excluded_labels = excluded_labels or set()
     excluded_automations = excluded_automations or {}
     source: dict[str, set[str]] = {}
@@ -483,7 +499,7 @@ class LinkedEntitiesCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]
             )
         )
         # Deferred so a full HA restart doesn't build the map before the
-        # automation/script domains have finished loading their own
+        # automation/script/scene domains have finished loading their own
         # entities; fires immediately on a warm config-entry reload since
         # hass is already running by then.
         self._unsubs.append(async_at_started(self.hass, self._handle_started))

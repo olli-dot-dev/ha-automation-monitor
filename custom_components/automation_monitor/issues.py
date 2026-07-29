@@ -27,12 +27,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-# HA config editor path segment per source domain - only automations and
-# scripts can ever appear in a linked entity's referenced_by (see
-# linked_entities_coordinator.py), but keyed by domain rather than
-# hardcoded to "automation" so a script source still gets a real editor
-# link instead of falling back to plain text.
-_EDITOR_PATH_BY_DOMAIN = {"automation": "automation", "script": "script"}
+# HA config editor path segment per source domain - automations,
+# scripts, and scenes can all appear in a linked entity's referenced_by
+# (see linked_entities_coordinator.py), but keyed by domain rather than
+# hardcoded to "automation" so a script/scene source still gets a real
+# editor link instead of falling back to plain text. The scene route
+# follows the same `/config/<domain>/edit/<id>` pattern as
+# automation/script - not independently verified live yet, unlike that
+# pattern for automation/script.
+_EDITOR_PATH_BY_DOMAIN = {"automation": "automation", "script": "script", "scene": "scene"}
 
 
 def _format_timestamp(iso_string: str) -> str:

@@ -27,7 +27,26 @@ HA update changes this:
 - "cancelled": e.g. `mode: single` re-triggered while already running.
   Concurrency behaviour, not an error.
 - "finished": completed normally (this is what a plain "success" run
-  reports - HA does not use the literal string "success").
+  reports - HA does not use the literal string "success") - **unless** a
+  step used `continue_on_error: true` to swallow a genuine runtime error
+  partway through (see `finished_run_had_suppressed_error` param).
+  Raised by a real user, forum feedback 2026-07-28, verified against the
+  real HA source (`homeassistant/helpers/script.py`, `_handle_exception`):
+  `continue_on_error` only suppresses a genuine `HomeAssistantError`
+  raised by an integration's own service call (e.g. "device did not
+  respond", a timeout); config/typo errors (`ServiceNotFound`,
+  `TemplateError`, invalid entity format, ...) and `stop:` actions are
+  explicitly excluded and always abort regardless, so those are still
+  caught the normal way (`script_execution == "error"`). When
+  `continue_on_error` *does* suppress one, HA marks that step's own
+  trace entry with `error` via `trace_element.set_error(exception)` but
+  does NOT re-raise, so the run's `for`/`else` loop completes normally
+  and the overall `script_execution` still ends up "finished" -
+  indistinguishable from a genuine, error-free success without checking
+  every step. Same mechanism this module already relies on for the
+  "aborted" case above, just not necessarily on `last_step` this time -
+  `continue_on_error` lets execution carry on past the failed step, so
+  it's very likely *not* the last one that ran.
 - "failed_single" / "failed_max_runs": a run was rejected because of the
   automation's `mode:` limits. Same category as "cancelled" - expected
   concurrency behaviour, not an error.
@@ -54,16 +73,22 @@ SCRIPT_EXECUTION_FAILED_CONDITIONS = "failed_conditions"
 SCRIPT_EXECUTION_DISALLOWED_RECURSION = "disallowed_recursion_detected"
 
 _ALWAYS_FAILURE = {SCRIPT_EXECUTION_ERROR, SCRIPT_EXECUTION_DISALLOWED_RECURSION}
+# SCRIPT_EXECUTION_FINISHED deliberately NOT in here - see module
+# docstring "finished" entry and finished_run_had_suppressed_error below.
 _NEVER_FAILURE = {
     SCRIPT_EXECUTION_CANCELLED,
-    SCRIPT_EXECUTION_FINISHED,
     SCRIPT_EXECUTION_FAILED_SINGLE,
     SCRIPT_EXECUTION_FAILED_MAX_RUNS,
     SCRIPT_EXECUTION_FAILED_CONDITIONS,
 }
 
 
-def is_execution_failure(script_execution: str | None, *, aborted_step_had_error: bool = False) -> bool:
+def is_execution_failure(
+    script_execution: str | None,
+    *,
+    aborted_step_had_error: bool = False,
+    finished_run_had_suppressed_error: bool = False,
+) -> bool:
     """Return True if a trace result counts as a real runtime failure.
 
     `aborted_step_had_error` only matters when `script_execution` is
@@ -73,6 +98,13 @@ def is_execution_failure(script_execution: str | None, *, aborted_step_had_error
     None) - the short trace dict alone can't distinguish the two
     "aborted" cases. Defaults to False (not a failure) so a caller that
     can't determine this doesn't produce a false positive.
+
+    `finished_run_had_suppressed_error` only matters when
+    `script_execution` is "finished" (see module docstring): pass
+    whether *any* step in the extended trace dict has its own `error`
+    field set - a `continue_on_error: true` step lets the run complete
+    normally despite a genuine runtime error partway through. Same
+    false-positive-avoidance default (False) as `aborted_step_had_error`.
     """
     if script_execution in _ALWAYS_FAILURE:
         return True
@@ -80,6 +112,8 @@ def is_execution_failure(script_execution: str | None, *, aborted_step_had_error
         return False
     if script_execution == SCRIPT_EXECUTION_ABORTED:
         return aborted_step_had_error
+    if script_execution == SCRIPT_EXECUTION_FINISHED:
+        return finished_run_had_suppressed_error
     # Unrecognised status (e.g. a future HA version added a new one):
     # default to "not a failure" to avoid false positives.
     return False

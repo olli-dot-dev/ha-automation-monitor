@@ -15,7 +15,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .classification import is_execution_failure
+from .classification import SCRIPT_EXECUTION_FINISHED, is_execution_failure
 from .const import (
     CONF_ENTITY_STREAK_OVERRIDES,
     CONF_EXCLUDED_AUTOMATIONS,
@@ -181,11 +181,34 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         last_step = trace.get("last_step")
         aborted_step_had_error = self._step_had_error(trace, last_step)
 
-        if is_execution_failure(script_execution, aborted_step_had_error=aborted_step_had_error):
+        # A "finished" run can still be hiding a real problem if a step
+        # used `continue_on_error: true` to swallow a genuine runtime
+        # error - see classification.py module docstring "finished"
+        # entry. Only worth scanning every step for this when the run
+        # actually finished; for other script_execution values the
+        # existing aborted_step_had_error/error-status handling already
+        # covers the relevant cases.
+        suppressed_error_step = (
+            self._find_suppressed_error_step(trace)
+            if script_execution == SCRIPT_EXECUTION_FINISHED
+            else None
+        )
+
+        if is_execution_failure(
+            script_execution,
+            aborted_step_had_error=aborted_step_had_error,
+            finished_run_had_suppressed_error=suppressed_error_step is not None,
+        ):
             streak = self._streaks.get(entity_id, 0) + 1
             self._streaks[entity_id] = streak
             threshold = self._effective_streak_threshold(entity_id)
             if streak >= threshold:
+                # suppressed_error_step (not last_step) for the
+                # continue_on_error case - the suppressed error isn't
+                # necessarily the last step that ran, and last_step
+                # would report the automation's actual final step
+                # (likely error-free) instead of the one that mattered.
+                error_step = suppressed_error_step or last_step
                 # Refreshed every time this fires, even if already
                 # flagged from an earlier failure in the same streak -
                 # keeps last_error_time/error_message current rather
@@ -196,8 +219,8 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
                     "name": self._async_get_name(entity_id),
                     "unique_id": self._async_get_unique_id(entity_id),
                     "last_error_time": datetime.now().astimezone().isoformat(),
-                    "error_message": self._build_error_message(trace, last_step),
-                    "error_step": last_step or "unknown",
+                    "error_message": self._build_error_message(trace, error_step),
+                    "error_step": error_step or "unknown",
                     "consecutive_failures": streak,
                 }
             # else: below threshold - tracked in _streaks, not yet
@@ -238,6 +261,27 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         if not steps:
             return False
         return steps[-1].get("error") is not None
+
+    @staticmethod
+    def _find_suppressed_error_step(trace: dict[str, Any]) -> str | None:
+        """First step path (trace dict iteration order - insertion
+        order, so lexically the order steps actually ran in) whose own
+        `error` field is set - used when script_execution == "finished"
+        to detect a `continue_on_error: true` step that swallowed a
+        genuine runtime error partway through an otherwise-successful
+        run (see classification.py module docstring "finished" entry).
+
+        Unlike `_step_had_error` above (which only ever checks
+        `last_step`, meaningful for the "aborted" case where the abort
+        *is* the last step that ran), a continue_on_error-suppressed
+        error is very likely *not* the last step - execution carries on
+        past it - so every step has to be checked here. `None` if no
+        step has an error set (the run is a genuine, error-free
+        success)."""
+        for step_path, steps in trace.get("trace", {}).items():
+            if steps and steps[-1].get("error") is not None:
+                return step_path
+        return None
 
     @staticmethod
     def _build_error_message(trace: dict[str, Any], last_step: str | None) -> str:

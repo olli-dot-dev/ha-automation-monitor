@@ -65,5 +65,17 @@ def test_finished_is_not_a_failure():
     assert is_execution_failure("finished") is False
 
 
+def test_finished_with_suppressed_error_is_a_failure():
+    # continue_on_error: true let the run complete ("finished") despite
+    # a genuine runtime error partway through - see classification.py
+    # module docstring.
+    assert is_execution_failure("finished", finished_run_had_suppressed_error=True) is True
+
+
+def test_finished_without_suppressed_error_info_defaults_to_not_a_failure():
+    # Caller couldn't determine per-step error info - default to no false positive.
+    assert is_execution_failure("finished") is False
+
+
 def test_unknown_status_defaults_to_not_a_failure():
     assert is_execution_failure("something_new_in_a_future_ha_version") is False

@@ -2,12 +2,68 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.8.1] - 2026-07-29
+
+- Fixed a `sensor.failed_automations` classification blind spot: a step
+  using `continue_on_error: true` could swallow a genuine runtime error
+  and let the run complete as `script_execution: "finished"` -
+  indistinguishable from an error-free success, so it was never flagged.
+  Raised by **Micha** via forum feedback, worried about exactly this.
+  Verified against the real HA source (`homeassistant/helpers/script.py`,
+  `_handle_exception`): `continue_on_error` only ever suppresses a
+  genuine `HomeAssistantError` from an integration's own service call;
+  config/typo errors (`ServiceNotFound`, bad templates, invalid entity
+  format, ...) are explicitly excluded and always abort regardless, so
+  those were never affected. `coordinator.py` now scans every step (not
+  just `last_step`, since a suppressed error isn't necessarily the last
+  one that ran) for a set `error` field whenever a run reports
+  "finished" (new `_find_suppressed_error_step`); `classification.
+  is_execution_failure` gained a `finished_run_had_suppressed_error`
+  parameter, same shape as the existing `aborted_step_had_error`. Unit
+  tests added. Live-verified on .208 with a safe test automation (calls
+  `homeassistant.reload_config_entry` with a bogus `entry_id`, raising a
+  real error without touching any actual device): the run completed as
+  "finished" but was still correctly flagged, with the right step and
+  error message.
+- Documented what the Repairs "Ignorieren"/"Ignore" button actually does
+  (asked by **Micha**): verified against the real HA source
+  (`homeassistant/helpers/issue_registry.py`,
+  `homeassistant/components/repairs/websocket_api.py`) it sets a
+  `dismissed_version` marker that hides the issue from the main Repairs
+  list without deleting it, and - importantly - this integration's own
+  update-in-place behavior (fresh error message/timestamp on a repeated
+  failure) explicitly preserves that marker, so an ignored issue stays
+  ignored through repeated occurrences of the same problem. It only
+  reappears once the issue is actually deleted and later re-created from
+  scratch, i.e. the automation/entity has to genuinely recover at least
+  once before failing again.
+- Added scenes as a third tracked source for
+  `sensor.linked_entities_unavailable`, alongside automations and
+  scripts - an entity referenced in a scene's `entities:` mapping that's
+  currently `unavailable` was previously invisible to this integration
+  even though the same silent-skip failure mode applies to scenes too.
+  Scenes turned out simpler to support than automations/scripts: no
+  action sequence, no device/area targets to resolve - HA's own
+  `entities_in_scene` helper (`homeassistant/components/homeassistant/
+  scene.py`) already returns the flat entity list directly, so no
+  `_domain_scoped_targets`-style logic was needed. `exclude_off_automations`
+  and `excluded_automations` remain automation-only (scenes have no
+  on/off state at all - activating one doesn't leave it "on" - and
+  weren't part of what was asked for); `excluded_labels` already worked
+  for any domain generically and needed no change. `referenced_by`
+  links for a scene source use the same `/config/scene/edit/<id>`
+  pattern as automation/script (not independently verified live, unlike
+  that pattern for automation/script). Live-verified on .208: a test
+  scene referencing a test helper entity, that entity set unavailable,
+  correctly flagged with `referenced_by: scene.<id>` and a matching
+  Repairs issue.
+
 ## [0.8.0] - 2026-07-27
 
 - Added a failure streak threshold for `sensor.failed_automations`: an
   automation now needs a configurable number of *consecutive* failures
   (default 1, i.e. unchanged from before) before it's flagged, instead of
-  always flagging on the very first one. Requested by a real user (forum
+  always flagging on the very first one. Requested by **AKie** (forum
   feedback) whose Zigbee mesh occasionally times out on the first attempt
   but succeeds on retry - a one-off blip isn't worth flagging, but a
   genuinely repeated failure still is. Tracked per-automation in-memory
@@ -129,10 +185,11 @@ All notable changes to Automation Monitor are documented here.
 ## [0.7.1] - 2026-07-25
 
 - Fixed the linked-entities-unavailable sensor over-attributing "used by"
-  for area/device-targeted automations and scripts (reported in #1: a
-  media_player falsely shown as "used by" several light/climate/cover
-  automations that merely shared its area, none of which ever call a
-  media_player service). The reference-map builder previously expanded
+  for area/device-targeted automations and scripts (reported by
+  **Supermario** in #1: a media_player falsely shown as "used by" several
+  light/climate/cover automations that merely shared its area, none of
+  which ever call a media_player service). The reference-map builder
+  previously expanded
   an automation/script's area or device target to *every* entity in that
   area/device regardless of domain - `light.turn_off` with
   `area_id: eg` was treated as referencing a `media_player.*` entity
