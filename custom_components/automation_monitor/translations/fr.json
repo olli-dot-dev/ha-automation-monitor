@@ -64,11 +64,6 @@
       "linked_entities_unavailable": {
         "name": "Entités liées indisponibles"
       }
-    },
-    "update": {
-      "update": {
-        "name": "Automation Monitor"
-      }
     }
   },
   "issues": {

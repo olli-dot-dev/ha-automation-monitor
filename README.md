@@ -13,12 +13,11 @@ sensors: one detects failed automation runs from trace data, the other
 proactively flags entities referenced by your automations/scripts/scenes
 that are stuck `unavailable` - a failure mode the trace-based sensor cannot see at
 all (see Linked entity unavailability detection). Optional Repairs issues,
-toggled independently per sensor (see Repairs issues) - no dashboard card,
+toggled independently per sensor (see Repairs issues), plus Logbook/Activity
+history for both, on by default (see Logbook) - no dashboard card,
 no retention logic beyond that. Detection and structured exposure is the
 focus; how you display or act on the data (Markdown card, `auto-entities`,
-your own automations, ...) is up to you. A third entity,
-`update.automation_monitor`, applies the same detect-and-expose approach
-to the integration itself (see Update detection).
+your own automations, ...) is up to you.
 
 ![Rendered Markdown card showing one failed automation](assets/recommended-display-detailed.png)
 
@@ -304,6 +303,26 @@ automation below, which you can run alongside these toggles (they don't
 conflict; one opens a Repairs entry, the other fires a one-off push
 notification per new failure).
 
+## Logbook
+
+Both sensors fire an entry to HA's built-in **Settings → Activity** page
+(called **Logbook** in older HA versions - the sidebar entry was renamed
+to "Activity"/"Aktivität" in a more recent frontend release; the
+underlying page and URL are still `logbook`) once per genuine
+flag/resolve *transition* - not on every repeated update of an
+already-open issue, so it reads as real history rather than noise:
+
+- `sensor.failed_automations`: "**\<name\>** failed: \<error message\>" /
+  "**\<name\>** recovered"
+- `sensor.linked_entities_unavailable`: "**\<name\>** became unavailable
+  (referenced by an automation/script/scene)" / "**\<name\>** became
+  available again"
+
+On by default and independent of the Repairs-issue toggles above (General
+settings) - you can have Activity history without Repairs pop-ups, or the
+other way around. No configuration, same as HA's own built-in
+`automation_triggered` Logbook entries.
+
 ## Language
 
 English, German, French and Spanish (`en`/`de`/`fr`/`es`) so far - German
@@ -344,38 +363,20 @@ safety-net rebuild. No target/fields - useful right after editing a
 script's or scene's content (see Linked entity unavailability detection
 for why scripts and scenes specifically need this).
 
-## Update detection
+## Updating
 
-`update.automation_monitor` checks this repo's GitHub Releases every 12
-hours (plus once immediately on setup/restart) and reports whether a
-newer version is available, with a direct link to the release notes.
-Detection only - it never installs anything itself; updating is still
-done the normal way (HACS, or a manual copy + restart).
+Installed via HACS (recommended, see Installation)? HACS creates its own
+update entity for every repository it manages, custom repositories
+included - look for an entity along the lines of
+`update.automation_monitor_update` (exact name may vary), which can
+actually install the new version, unlike a from-scratch GitHub-polling
+entity this project used to ship (removed in v0.9.0 for exactly this
+reason - see CHANGELOG). You can also just check the HACS panel itself.
 
-This exists because the integration isn't on the default HACS store yet
-(see Installation) - HACS only creates its own per-repository update
-entity for integrations it fully manages that way, not for ones added as
-a custom repository. If GitHub can't be reached (or the request is
-rate-limited), the entity reports itself `unavailable` rather than
-silently claiming "up to date".
-
-Want a push notification the moment an update becomes available, rather
-than checking the entity yourself? Same pattern as the failed-automations
-example above:
-
-```yaml
-triggers:
-  - trigger: state
-    entity_id: update.automation_monitor
-    to: "on"
-actions:
-  - action: notify.notify  # replace with your actual notify target
-    data:
-      title: "Automation Monitor update available"
-      message: >
-        {{ state_attr('update.automation_monitor', 'latest_version') }} is out.
-        {{ state_attr('update.automation_monitor', 'release_url') }}
-```
+Installed manually (no HACS)? There's no automatic update detection at
+all - watch the [Releases page](https://github.com/olli-dot-dev/ha-automation-monitor/releases)
+or [CHANGELOG.md](CHANGELOG.md), and repeat the Manual installation steps
+with the new version when you want to update.
 
 ## Recommended display (documentation only, not part of the integration)
 

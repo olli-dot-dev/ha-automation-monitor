@@ -9,10 +9,10 @@ from dataclasses import dataclass
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import ATTR_NAME
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.loader import async_get_integration
 
 from .const import (
     ATTR_ENTITY_ID,
@@ -20,6 +20,10 @@ from .const import (
     CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
     DEFAULT_NOTIFY,
     DOMAIN,
+    EVENT_FAILURE_DETECTED,
+    EVENT_FAILURE_RESOLVED,
+    EVENT_LINKED_ENTITY_AVAILABLE,
+    EVENT_LINKED_ENTITY_UNAVAILABLE,
     ISSUE_PREFIX_FAILED_AUTOMATION,
     ISSUE_PREFIX_LINKED_ENTITY_UNAVAILABLE,
     PLATFORMS,
@@ -29,7 +33,6 @@ from .const import (
 from .coordinator import AutomationMonitorCoordinator
 from .issues import failed_automation_placeholders, linked_entity_placeholders
 from .linked_entities_coordinator import LinkedEntitiesCoordinator
-from .update_coordinator import UpdateCheckCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,8 +49,6 @@ class AutomationMonitorRuntimeData:
 
     failures: AutomationMonitorCoordinator
     linked_entities: LinkedEntitiesCoordinator
-    update_check: UpdateCheckCoordinator
-    installed_version: str
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -57,31 +58,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     linked_entities_coordinator = LinkedEntitiesCoordinator(hass, entry)
     linked_entities_coordinator.async_setup()
 
-    integration = await async_get_integration(hass, DOMAIN)
-    update_coordinator = UpdateCheckCoordinator(hass)
-    # First refresh happens right away rather than waiting up to
-    # UPDATE_CHECK_INTERVAL_HOURS for the first result - a fresh install
-    # or restart shouldn't have to wait hours to know whether it's already
-    # out of date. A failure here (GitHub unreachable) leaves
-    # coordinator.data at None rather than raising, same as any other
-    # DataUpdateCoordinator refresh failure - the entity reports itself
-    # unavailable (see update.py) instead of blocking setup.
-    await update_coordinator.async_refresh()
-
     runtime_data = AutomationMonitorRuntimeData(
         failures=failures_coordinator,
         linked_entities=linked_entities_coordinator,
-        update_check=update_coordinator,
-        # integration.version is an AwesomeVersion (a str subclass with its
-        # own __eq__ that chokes on non-version-like values, e.g. HA's
-        # entity-attribute-caching sentinel) - cast to a plain str so
-        # `_attr_installed_version` never crashes entity setup.
-        # Live-verified on .208: raised "Not a valid AwesomeVersion object"
-        # in homeassistant.helpers.entity._setter without this cast.
-        installed_version=str(integration.version) if integration.version else "0.0.0",
     )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime_data
-    entry.async_on_unload(update_coordinator.async_shutdown)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -144,6 +125,77 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # here.
     _update_failed_automations_issues()
     _update_linked_entities_issues()
+
+    # Logbook history (Settings -> Logbook, see logbook.py) - fires once per
+    # flag/resolve *transition*. Tracks the previously-seen id set in a
+    # plain closure variable, independent of the coordinators' own `.data`
+    # (which only ever reflects *current* state) and of the Repairs-issue
+    # toggles/registry above - this always runs, on-by-default like HA's
+    # own `automation_triggered` event. Reset on every reload/restart (a
+    # fresh, empty set): an already-broken automation still flagged right
+    # after a restart fires "detected" again rather than staying silent
+    # forever, consistent with this project's fully-stateless,
+    # current-state-only design (see README "Usage") - the same tradeoff
+    # already accepted for the Repairs-issue sync's initial full-reconcile
+    # call above.
+    _last_failed_ids: set[str] = set()
+    _last_unavailable_ids: set[str] = set()
+
+    @callback
+    def _fire_failure_events() -> None:
+        nonlocal _last_failed_ids
+        current_ids = set(failures_coordinator.data)
+        for entity_id in current_ids - _last_failed_ids:
+            info = failures_coordinator.data[entity_id]
+            hass.bus.async_fire(
+                EVENT_FAILURE_DETECTED,
+                {
+                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_NAME: info["name"],
+                    "error_message": info["error_message"],
+                    "error_step": info["error_step"],
+                },
+            )
+        for entity_id in _last_failed_ids - current_ids:
+            state = hass.states.get(entity_id)
+            hass.bus.async_fire(
+                EVENT_FAILURE_RESOLVED,
+                {
+                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_NAME: state.name if state else entity_id,
+                },
+            )
+        _last_failed_ids = current_ids
+
+    @callback
+    def _fire_linked_entity_events() -> None:
+        nonlocal _last_unavailable_ids
+        current_ids = set(linked_entities_coordinator.data)
+        for entity_id in current_ids - _last_unavailable_ids:
+            info = linked_entities_coordinator.data[entity_id]
+            hass.bus.async_fire(
+                EVENT_LINKED_ENTITY_UNAVAILABLE,
+                {ATTR_ENTITY_ID: entity_id, ATTR_NAME: info["name"]},
+            )
+        for entity_id in _last_unavailable_ids - current_ids:
+            state = hass.states.get(entity_id)
+            hass.bus.async_fire(
+                EVENT_LINKED_ENTITY_AVAILABLE,
+                {
+                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_NAME: state.name if state else entity_id,
+                },
+            )
+        _last_unavailable_ids = current_ids
+
+    entry.async_on_unload(
+        failures_coordinator.async_add_listener(_fire_failure_events)
+    )
+    entry.async_on_unload(
+        linked_entities_coordinator.async_add_listener(_fire_linked_entity_events)
+    )
+    _fire_failure_events()
+    _fire_linked_entity_events()
 
     async def _async_handle_reset(call: ServiceCall) -> None:
         failures_coordinator.reset(call.data.get(ATTR_ENTITY_ID))

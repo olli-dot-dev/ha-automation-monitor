@@ -2,6 +2,63 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.9.0] - 2026-08-02
+
+- Removed `update.automation_monitor` (and its GitHub-polling
+  `update_coordinator.py`) entirely. Reported by **Klaus** via forum
+  feedback: the entity showed an update as available but wouldn't let him
+  install it, which read as broken. Investigated by reading HACS's own
+  source (`custom_components/hacs/update.py`): HACS creates its own
+  `UpdateEntity` for *every* repository in `hacs.repositories.list_downloaded`
+  - defined generically as "any repo with `data.installed = True`", with
+  no distinction between the default store and a custom repository - and
+  that entity has full `UpdateEntityFeature.INSTALL` support, i.e. it can
+  actually perform the update. This directly contradicts what this
+  project previously assumed and documented (`const.py`: "HACS never
+  creates its own update.* entity for it... confirmed absent on a live
+  instance") - live-verified on the local Docker test instance by
+  actually installing this integration through HACS as a custom
+  repository: both `update.automation_monitor` (ours, no install
+  capability) and `update.automation_monitor_update` (HACS's own, fully
+  functional) existed side by side. For the HACS-based install path this
+  project's Installation section actually recommends, our own entity was
+  pure redundant noise at best and, per Klaus's report, actively
+  misleading at worst - two "update available" cards for the same thing,
+  only one of which does anything. Considered keeping it only for manual
+  (non-HACS) installs (detecting at runtime whether HACS already manages
+  this integration and skipping entity creation if so), but rejected:
+  no stable/official HACS API for that check, and a permanently
+  split-behavior entity depending on install method wasn't worth the
+  added complexity for what's likely a small minority of installs. A
+  manual install now has no automatic update detection at all - see
+  README "Updating" for what to do instead in each case.
+- Added Logbook history: `sensor.failed_automations` and
+  `sensor.linked_entities_unavailable` are otherwise fully stateless (no
+  persistence across restarts, by design - see README "Usage"), so there
+  was previously no way to see *when* a problem started or was resolved
+  without catching it live. Four new events
+  (`automation_monitor_failure_detected`/`_resolved`,
+  `automation_monitor_linked_entity_unavailable`/`_available`) now fire
+  once per genuine flag/resolve *transition* (not on every repeated
+  coordinator update, e.g. the linked-entities 20-minute safety-net
+  rebuild), described via a new `logbook.py` module following the exact
+  pattern HA core's own `automation` integration uses
+  (`homeassistant/components/automation/logbook.py`) - no manifest
+  dependency declaration needed, confirmed against that same core source
+  that `automation`'s manifest doesn't list one either. Shows up under
+  **Settings → Activity** (labeled "Logbook" in older HA versions - the
+  sidebar entry was renamed to "Activity"/"Aktivität" in a more recent
+  frontend release). Independent of the Repairs-issue toggles (General
+  settings): this always fires, on by default, same as HA's own
+  `automation_triggered` event - a user may want Logbook/Activity history
+  without wanting Repairs pop-ups, or vice versa. Live-verified on a new
+  local Docker-based test instance (no `.208`/SSH involved - see
+  Contributing): triggering and resolving a test failure produced
+  "<name> failed: <error>" / "<name> recovered" entries, and flapping a
+  linked test entity produced "<name> became unavailable (referenced by
+  an automation/script/scene)" / "<name> became available again", all
+  visible via the real `/api/logbook/` endpoint.
+
 ## [0.8.1] - 2026-07-29
 
 - Fixed a `sensor.failed_automations` classification blind spot: a step

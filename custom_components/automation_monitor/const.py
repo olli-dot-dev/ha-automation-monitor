@@ -1,7 +1,7 @@
 """Constants for Automation Monitor."""
 
 DOMAIN = "automation_monitor"
-PLATFORMS = ["sensor", "update"]
+PLATFORMS = ["sensor"]
 
 EVENT_AUTOMATION_TRIGGERED = "automation_triggered"
 
@@ -125,16 +125,18 @@ SCOPE_FAILED_AUTOMATIONS = "failed_automations"
 SCOPE_LINKED_ENTITIES_UNAVAILABLE = "linked_entities_unavailable"
 EXCLUSION_SCOPES = [SCOPE_FAILED_AUTOMATIONS, SCOPE_LINKED_ENTITIES_UNAVAILABLE]
 
-# Update entity: checks this repo's GitHub Releases for a newer version
-# than what's installed. Not published to the default HACS store (see
-# README Installation), so HACS never creates its own update.* entity for
-# it the way it does for its own app or default-store integrations -
-# confirmed absent on a live instance (only update.hacs_update existed,
-# nothing per-repository). This entity fills that specific gap; it only
-# detects and links to the release, it never installs anything itself -
-# same "detect and expose, don't act" scope as the two sensors.
-GITHUB_REPO = "olli-dot-dev/ha-automation-monitor"
-UPDATE_CHECK_INTERVAL_HOURS = 12
+# Logbook events (see logbook.py) - fired once per flag/resolve
+# *transition*, not on every repeated coordinator update, so the Logbook
+# page reads as real history rather than being spammed by e.g. the 20-
+# minute linked-entities safety-net rebuild. Independent of the Repairs-
+# issue toggles above (CONF_NOTIFY_*) - a user may want Logbook history
+# without wanting Repairs pop-ups, or vice versa, so this always fires
+# regardless of those. No config_flow toggle of its own, matching how
+# HA's own `automation_triggered` event isn't optional either.
+EVENT_FAILURE_DETECTED = "automation_monitor_failure_detected"
+EVENT_FAILURE_RESOLVED = "automation_monitor_failure_resolved"
+EVENT_LINKED_ENTITY_UNAVAILABLE = "automation_monitor_linked_entity_unavailable"
+EVENT_LINKED_ENTITY_AVAILABLE = "automation_monitor_linked_entity_available"
 
 # How often to rebuild the automation/script -> referenced-entity map as a
 # safety net, since there is no HA event for "a script's content changed"
