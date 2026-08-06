@@ -2,6 +2,21 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.9.1] - 2026-08-06
+
+- Fixed: on a non-English Home Assistant instance, both sensors' entity_id
+  was generated from the *translated* name on first setup (e.g.
+  `sensor.fehlgeschlagene_automationen` on a German instance instead of
+  `sensor.failed_automations`), silently breaking every entity_id in the
+  README's example cards/automations. Both sensors now pin
+  `suggested_object_id` to a fixed English slug, independent of UI
+  language - the displayed name is still fully translated as before.
+  Reported by **Martin Heinze** (issue #4): German HA 2026.7.4, v0.9.0.
+  Only affects entities created from now on - existing installs keep
+  their already-created (localized) entity_id; rename manually via
+  Settings → Entities → pencil icon, or remove and re-add the integration
+  for a fresh one.
+
 ## [0.9.0] - 2026-08-02
 
 - Removed `update.automation_monitor` (and its GitHub-polling

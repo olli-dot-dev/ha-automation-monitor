@@ -31,6 +31,16 @@ class FailedAutomationsSensor(CoordinatorEntity[AutomationMonitorCoordinator], S
 
     _attr_has_entity_name = True
     _attr_translation_key = "failed_automations"
+    # Without this, HA derives the initial entity_id from the *translated*
+    # name (has_entity_name + translation_key resolves through the
+    # user's UI language) - on a non-English instance that means
+    # e.g. `sensor.fehlgeschlagene_automationen` on first setup, silently
+    # breaking every entity_id in the README's example cards/automations.
+    # suggested_object_id pins the slug source to this fixed, English
+    # string instead, independent of `_attr_translation_key`/UI language -
+    # the *displayed* name is still fully translated as before. Reported
+    # by a real user (issue #4, 2026-08-06, German-language HA 2026.7.4).
+    _attr_suggested_object_id = "failed_automations"
     _attr_icon = "mdi:robot-confused"
 
     def __init__(self, coordinator: AutomationMonitorCoordinator, entry: ConfigEntry) -> None:
@@ -57,6 +67,8 @@ class LinkedEntitiesUnavailableSensor(
 
     _attr_has_entity_name = True
     _attr_translation_key = "linked_entities_unavailable"
+    # See FailedAutomationsSensor above - same fix, same reason.
+    _attr_suggested_object_id = "linked_entities_unavailable"
     _attr_icon = "mdi:lan-disconnect"
 
     def __init__(self, coordinator: LinkedEntitiesCoordinator, entry: ConfigEntry) -> None:
