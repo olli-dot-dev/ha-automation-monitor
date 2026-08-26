@@ -24,6 +24,7 @@ from .const import (
     CONF_EXCLUDED_LABELS,
     CONF_FAILURE_STREAK_THRESHOLD,
     CONF_IGNORED_ENTITIES,
+    CONF_IGNORED_ERROR_TEXTS,
     CONF_NOTIFY_FAILED_AUTOMATIONS,
     CONF_NOTIFY_LINKED_ENTITIES_UNAVAILABLE,
     CONF_UNAVAILABLE_THRESHOLD_MINUTES,
@@ -33,6 +34,7 @@ from .const import (
     DEFAULT_EXCLUDED_LABELS,
     DEFAULT_FAILURE_STREAK_THRESHOLD,
     DEFAULT_IGNORED_ENTITIES,
+    DEFAULT_IGNORED_ERROR_TEXTS,
     DEFAULT_NOTIFY,
     DEFAULT_UNAVAILABLE_THRESHOLD_MINUTES,
     DOMAIN,
@@ -76,7 +78,8 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
       automation-specific (unavailable threshold, excluded labels - which
       affect both automations AND entities/devices, so can't live in
       either of the other two groups - both notification toggles, the
-      global failure-streak-threshold default).
+      global failure-streak-threshold default, the ignored-error-texts
+      free-text filter list).
     - "entities" -> "streak_overrides": entity-level settings - the
       linked-entities ignore list (CONF_IGNORED_ENTITIES) plus per-entity
       streak-threshold overrides (CONF_ENTITY_STREAK_OVERRIDES). The
@@ -162,6 +165,9 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
         current_streak_threshold = self.config_entry.options.get(
             CONF_FAILURE_STREAK_THRESHOLD, DEFAULT_FAILURE_STREAK_THRESHOLD
         )
+        current_ignored_error_texts = self.config_entry.options.get(
+            CONF_IGNORED_ERROR_TEXTS, DEFAULT_IGNORED_ERROR_TEXTS
+        )
         schema = vol.Schema(
             {
                 vol.Required(
@@ -183,6 +189,18 @@ class AutomationMonitorOptionsFlow(config_entries.OptionsFlow):
                     CONF_FAILURE_STREAK_THRESHOLD, default=current_streak_threshold
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=20, mode="box")
+                ),
+                # Free-text tag list (no predefined choices, user types
+                # their own) - HA's standard pattern for this shape of
+                # field, same widget style as the multi-select selectors
+                # elsewhere in this flow. See CONF_IGNORED_ERROR_TEXTS in
+                # const.py.
+                vol.Optional(
+                    CONF_IGNORED_ERROR_TEXTS, default=current_ignored_error_texts
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[], multiple=True, custom_value=True, mode="list"
+                    )
                 ),
             }
         )

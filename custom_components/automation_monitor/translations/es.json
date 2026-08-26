@@ -21,13 +21,14 @@
       },
       "general": {
         "title": "Opciones de Automation Monitor",
-        "description": "Durante cuánto tiempo una entidad referenciada por una automatización o script debe permanecer continuamente no disponible antes de ser marcada, qué etiquetas excluyen por completo de la monitorización a las automatizaciones/entidades/dispositivos que las llevan (siempre ambos sensores a la vez - para ajustes propios de entidades o automatizaciones, ve a los elementos de menú «Entidades»/«Automatizaciones»), si se debe abrir un aviso de Reparaciones para cada sensor (Ajustes -> Reparaciones, solo visible para administradores), y cuántos fallos consecutivos necesita una automatización antes de ser marcada.",
+        "description": "Durante cuánto tiempo una entidad referenciada por una automatización o script debe permanecer continuamente no disponible antes de ser marcada, qué etiquetas excluyen por completo de la monitorización a las automatizaciones/entidades/dispositivos que las llevan (siempre ambos sensores a la vez - para ajustes propios de entidades o automatizaciones, ve a los elementos de menú «Entidades»/«Automatizaciones»), si se debe abrir un aviso de Reparaciones para cada sensor (Ajustes -> Reparaciones, solo visible para administradores), cuántos fallos consecutivos necesita una automatización antes de ser marcada, y mensajes de error que nunca deben contar como un fallo (p. ej. un error conocido pero sin importancia, sin excluir toda la automatización).",
         "data": {
           "unavailable_threshold_minutes": "Umbral de no disponibilidad (minutos)",
           "excluded_labels": "Etiquetas excluidas (automatizaciones/entidades/dispositivos, siempre ambos sensores)",
           "notify_failed_automations": "Abrir un aviso de Reparaciones para automatizaciones fallidas",
           "notify_linked_entities_unavailable": "Abrir un aviso de Reparaciones para entidades vinculadas no disponibles",
-          "failure_streak_threshold": "Umbral de fallos consecutivos (antes de marcar)"
+          "failure_streak_threshold": "Umbral de fallos consecutivos (antes de marcar)",
+          "ignored_error_texts": "Textos de error ignorados (un fallo que contenga alguno de estos textos nunca se marca, escribe tu propio texto)"
         }
       },
       "entities": {

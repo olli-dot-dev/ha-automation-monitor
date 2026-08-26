@@ -240,6 +240,28 @@ scope cut, documented in `coordinator.py`'s
 several entities with different overrides, the *highest* one wins
 (treated as tolerantly as the flakiest entity it touches).
 
+### Ignored error texts
+
+Checked in `coordinator.py::_async_process_trigger`, right after
+`_build_error_message` and before the streak counter is touched - a
+match causes an immediate `return`, so the streak, `.data`, and the
+Logbook events (see below) are all left completely untouched, as if this
+particular run never happened. Deliberately checked *before* the streak
+increment (not after, with an undo) - `error_message`/`error_step` used
+to only be computed once a run was already known to cross the threshold;
+moving that computation earlier (harmless, since `_build_error_message`
+is a pure static method with no side effects) keeps the control flow a
+single straight line instead of a compute-then-maybe-rollback shape.
+
+Plain, case-sensitive substring containment (`text in error_message`),
+not regex - matches how the feature was requested (a real user wanted to
+paste in the *exact* wording of one known-flaky error, not write a
+pattern). Narrower than `excluded_automations`/`excluded_labels`: those
+drop the automation/entity from monitoring entirely regardless of *why*
+it failed, whereas this only suppresses one specific kind of error -
+other, different failures on the same automation are still caught and
+flagged normally.
+
 ## Repairs issues internals
 
 Shows up under Settings → System → Repairs - admin-only, which is the

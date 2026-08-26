@@ -21,13 +21,14 @@
       },
       "general": {
         "title": "Automation Monitor Einstellungen",
-        "description": "Wie lange eine von einer Automation oder einem Skript referenzierte Entität durchgehend nicht verfügbar sein muss, bevor sie markiert wird, welche Labels die damit versehenen Automationen/Entitäten/Geräte komplett von der Überwachung ausschließen (immer beide Sensoren zugleich - für reine Entitäten- oder Automations-Einstellungen siehe die Menüpunkte „Entitäten“/„Automationen“), ob für jeden Sensor ein Repairs-Issue eröffnet werden soll (Einstellungen → Reparaturen, nur für Admins sichtbar), und wie viele aufeinanderfolgende Fehlschläge eine Automation braucht, bevor sie markiert wird.",
+        "description": "Wie lange eine von einer Automation oder einem Skript referenzierte Entität durchgehend nicht verfügbar sein muss, bevor sie markiert wird, welche Labels die damit versehenen Automationen/Entitäten/Geräte komplett von der Überwachung ausschließen (immer beide Sensoren zugleich - für reine Entitäten- oder Automations-Einstellungen siehe die Menüpunkte „Entitäten“/„Automationen“), ob für jeden Sensor ein Repairs-Issue eröffnet werden soll (Einstellungen → Reparaturen, nur für Admins sichtbar), wie viele aufeinanderfolgende Fehlschläge eine Automation braucht, bevor sie markiert wird, und Fehlermeldungen, die nie als Fehlschlag zählen sollen (z.B. ein bestimmter bekannter, aber unproblematischer Fehler, ohne gleich die ganze Automation auszuschließen).",
         "data": {
           "unavailable_threshold_minutes": "Schwellwert für nicht verfügbar (Minuten)",
           "excluded_labels": "Ausgeschlossene Labels (Automationen/Entitäten/Geräte, immer beide Sensoren)",
           "notify_failed_automations": "Repairs-Issue bei fehlgeschlagenen Automationen eröffnen",
           "notify_linked_entities_unavailable": "Repairs-Issue bei nicht verfügbaren verknüpften Entitäten eröffnen",
-          "failure_streak_threshold": "Schwellwert für aufeinanderfolgende Fehlschläge (bis zur Markierung)"
+          "failure_streak_threshold": "Schwellwert für aufeinanderfolgende Fehlschläge (bis zur Markierung)",
+          "ignored_error_texts": "Ignorierte Fehlertexte (ein Fehlschlag mit einem dieser Texte wird nie markiert, eigenen Text eingeben)"
         }
       },
       "entities": {

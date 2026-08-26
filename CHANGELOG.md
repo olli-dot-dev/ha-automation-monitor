@@ -2,6 +2,31 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.10.0] - 2026-08-26
+
+- Added: **ignored error texts** - a new General settings option, a
+  free-text list of substrings checked against a failure's error message.
+  If any one matches, that run never counts as a failure at all (no
+  streak change, not flagged, no Logbook event), even though it's a
+  genuine error - narrower than excluding the whole automation/entity,
+  which drops it regardless of *why* it failed. Other, different failures
+  on the same automation are still caught and flagged normally. Requested
+  by a real user ("Micha", forum feedback) who wanted one specific,
+  known-flaky error (a transient device connection error) silenced
+  without losing coverage of everything else that automation might fail
+  on. Plain substring matching, not regex, to match how it was requested.
+  See README "Failure classification" and
+  [TECHNICAL.md](TECHNICAL.md#ignored-error-texts).
+
+  Live-verified on the local Docker test instance: two nearly-identical
+  test automations (`stop: <text> / error: true`), one with a text
+  matching a configured filter, one without. The matching one triggered
+  genuinely but never appeared in `sensor.failed_automations` and
+  produced no Logbook entry; the non-matching one was flagged normally
+  with the exact configured error text and did produce a Logbook "failed"
+  entry - confirms the filter suppresses the specific case without
+  affecting unrelated failures.
+
 ## [0.9.1] - 2026-08-06
 
 - Fixed: on a non-English Home Assistant instance, both sensors' entity_id

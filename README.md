@@ -163,6 +163,16 @@ failures an automation needs before `sensor.failed_automations` actually
 reports it, with an optional per-entity override for particularly flaky
 devices. See Configuration.
 
+A third, separate mechanism: **ignored error texts** (General settings) -
+a list of free-text substrings checked against a failure's error message.
+If any one matches, that run is treated as if it never happened at all
+(no streak change, not flagged) - even though it's a genuine failure.
+Useful for one specific, known-flaky error (e.g. a transient connection
+error from a particular device) you want to silence without losing
+coverage of every *other* way that automation could fail, unlike
+excluding the whole automation (see Configuration → Automations) or a
+whole entity/device (see Configuration → Entities).
+
 Uses HA's trace API rather than parsing log messages (fragile - free
 text, language-dependent, changes between HA versions) - see
 [TECHNICAL.md](TECHNICAL.md#data-source) for how that's implemented and
@@ -199,8 +209,9 @@ Settings that aren't clearly entity- or automation-specific: the
 `linked_entities_unavailable` threshold (see Linked entity unavailability
 detection), excluded labels (affects *both* sensors at once - see below
 for how that differs from the entity-/automation-specific settings),
-whether to open a Repairs issue per sensor (see Repairs issues), and the
-global failure streak threshold (see Failure classification).
+whether to open a Repairs issue per sensor (see Repairs issues), the
+global failure streak threshold, and ignored error texts (see Failure
+classification for both).
 
 ![General settings screen](assets/options-general.png)
 

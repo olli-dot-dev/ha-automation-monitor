@@ -21,13 +21,14 @@
       },
       "general": {
         "title": "Options d'Automation Monitor",
-        "description": "Durée pendant laquelle une entité référencée par une automatisation ou un script doit rester continuellement indisponible avant d'être signalée, quelles étiquettes excluent entièrement de la surveillance les automatisations/entités/appareils qui les portent (toujours les deux capteurs à la fois - pour des réglages propres aux entités ou aux automatisations, voir les entrées de menu « Entités »/« Automatisations »), s'il faut ouvrir un ticket Réparations pour chaque capteur (Paramètres -> Réparations, réservé aux administrateurs), et combien d'échecs consécutifs une automatisation nécessite avant d'être signalée.",
+        "description": "Durée pendant laquelle une entité référencée par une automatisation ou un script doit rester continuellement indisponible avant d'être signalée, quelles étiquettes excluent entièrement de la surveillance les automatisations/entités/appareils qui les portent (toujours les deux capteurs à la fois - pour des réglages propres aux entités ou aux automatisations, voir les entrées de menu « Entités »/« Automatisations »), s'il faut ouvrir un ticket Réparations pour chaque capteur (Paramètres -> Réparations, réservé aux administrateurs), combien d'échecs consécutifs une automatisation nécessite avant d'être signalée, et des messages d'erreur qui ne doivent jamais compter comme un échec (par ex. une erreur connue et sans gravité, sans exclure toute l'automatisation).",
         "data": {
           "unavailable_threshold_minutes": "Seuil d'indisponibilité (minutes)",
           "excluded_labels": "Étiquettes exclues (automatisations/entités/appareils, toujours les deux capteurs)",
           "notify_failed_automations": "Ouvrir un ticket Réparations pour les automatisations en échec",
           "notify_linked_entities_unavailable": "Ouvrir un ticket Réparations pour les entités liées indisponibles",
-          "failure_streak_threshold": "Seuil d'échecs consécutifs (avant signalement)"
+          "failure_streak_threshold": "Seuil d'échecs consécutifs (avant signalement)",
+          "ignored_error_texts": "Textes d'erreur ignorés (un échec contenant l'un de ces textes n'est jamais signalé, saisissez votre propre texte)"
         }
       },
       "entities": {

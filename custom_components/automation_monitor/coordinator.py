@@ -21,10 +21,12 @@ from .const import (
     CONF_EXCLUDED_AUTOMATIONS,
     CONF_EXCLUDED_LABELS,
     CONF_FAILURE_STREAK_THRESHOLD,
+    CONF_IGNORED_ERROR_TEXTS,
     DEFAULT_ENTITY_STREAK_OVERRIDES,
     DEFAULT_EXCLUDED_AUTOMATIONS,
     DEFAULT_EXCLUDED_LABELS,
     DEFAULT_FAILURE_STREAK_THRESHOLD,
+    DEFAULT_IGNORED_ERROR_TEXTS,
     DOMAIN,
     EVENT_AUTOMATION_TRIGGERED,
     SCOPE_FAILED_AUTOMATIONS,
@@ -77,6 +79,20 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         return self._entry.options.get(
             CONF_EXCLUDED_AUTOMATIONS, DEFAULT_EXCLUDED_AUTOMATIONS
         )
+
+    @property
+    def _ignored_error_texts(self) -> list[str]:
+        return self._entry.options.get(
+            CONF_IGNORED_ERROR_TEXTS, DEFAULT_IGNORED_ERROR_TEXTS
+        )
+
+    def _is_ignored_error(self, error_message: str) -> bool:
+        """Whether `error_message` contains any of the configured
+        free-text filters (CONF_IGNORED_ERROR_TEXTS) - plain substring
+        containment, checked fresh on every trigger (same as
+        _excluded_labels/_excluded_automations) so an options change
+        takes effect on the very next run without a reload."""
+        return any(text in error_message for text in self._ignored_error_texts)
 
     @property
     def _default_streak_threshold(self) -> int:
@@ -199,16 +215,26 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
             aborted_step_had_error=aborted_step_had_error,
             finished_run_had_suppressed_error=suppressed_error_step is not None,
         ):
+            # suppressed_error_step (not last_step) for the
+            # continue_on_error case - the suppressed error isn't
+            # necessarily the last step that ran, and last_step would
+            # report the automation's actual final step (likely
+            # error-free) instead of the one that mattered. Computed here
+            # (before the streak/threshold logic below) so the
+            # CONF_IGNORED_ERROR_TEXTS check can see the real error text.
+            error_step = suppressed_error_step or last_step
+            error_message = self._build_error_message(trace, error_step)
+            if self._is_ignored_error(error_message):
+                # Matches a configured free-text filter - treated as if
+                # this run never happened for classification purposes:
+                # no streak change, no flag, existing streak/data (if any,
+                # from an earlier *different* failure) left untouched.
+                return
+
             streak = self._streaks.get(entity_id, 0) + 1
             self._streaks[entity_id] = streak
             threshold = self._effective_streak_threshold(entity_id)
             if streak >= threshold:
-                # suppressed_error_step (not last_step) for the
-                # continue_on_error case - the suppressed error isn't
-                # necessarily the last step that ran, and last_step
-                # would report the automation's actual final step
-                # (likely error-free) instead of the one that mattered.
-                error_step = suppressed_error_step or last_step
                 # Refreshed every time this fires, even if already
                 # flagged from an earlier failure in the same streak -
                 # keeps last_error_time/error_message current rather
@@ -219,7 +245,7 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
                     "name": self._async_get_name(entity_id),
                     "unique_id": self._async_get_unique_id(entity_id),
                     "last_error_time": datetime.now().astimezone().isoformat(),
-                    "error_message": self._build_error_message(trace, error_step),
+                    "error_message": error_message,
                     "error_step": error_step or "unknown",
                     "consecutive_failures": streak,
                 }

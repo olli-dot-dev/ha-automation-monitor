@@ -21,13 +21,14 @@
       },
       "general": {
         "title": "Automation Monitor options",
-        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which labels exclude the automations/entities/devices carrying them from monitoring entirely (both sensors at once - for entity-only or automation-only settings, see the \"Entities\"/\"Automations\" menu items instead), whether to open a Repairs issue for each sensor (Settings -> Repairs, admin-only), and how many consecutive failures an automation needs before it's flagged.",
+        "description": "How long an entity referenced by an automation or script must stay continuously unavailable before it's flagged, which labels exclude the automations/entities/devices carrying them from monitoring entirely (both sensors at once - for entity-only or automation-only settings, see the \"Entities\"/\"Automations\" menu items instead), whether to open a Repairs issue for each sensor (Settings -> Repairs, admin-only), how many consecutive failures an automation needs before it's flagged, and error messages that should never count as a failure at all (e.g. one specific flaky error you want to ignore, without excluding the whole automation).",
         "data": {
           "unavailable_threshold_minutes": "Unavailable threshold (minutes)",
           "excluded_labels": "Excluded labels (automations/entities/devices, both sensors at once)",
           "notify_failed_automations": "Open a Repairs issue for failed automations",
           "notify_linked_entities_unavailable": "Open a Repairs issue for unavailable linked entities",
-          "failure_streak_threshold": "Failure streak threshold (consecutive failures before flagging)"
+          "failure_streak_threshold": "Failure streak threshold (consecutive failures before flagging)",
+          "ignored_error_texts": "Ignored error texts (a failure containing any of these is never flagged, type your own text)"
         }
       },
       "entities": {

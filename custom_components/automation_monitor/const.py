@@ -121,6 +121,24 @@ DEFAULT_ENTITY_STREAK_OVERRIDES: dict[str, int] = {}
 CONF_EXCLUDED_AUTOMATIONS = "excluded_automations"
 DEFAULT_EXCLUDED_AUTOMATIONS: dict[str, list[str]] = {}
 
+# Options flow: free-text substrings matched against a failure's
+# error_message (see coordinator.py _build_error_message) - if any one is
+# found, the run is treated as if it never happened for classification
+# purposes (no streak change, no flag, existing streak/data left
+# untouched), even though it's a genuine failure. Narrower than
+# CONF_EXCLUDED_AUTOMATIONS/CONF_EXCLUDED_LABELS (which drop an entire
+# automation or entity/device from monitoring): this only suppresses one
+# specific *kind* of error, so other, different failures on the same
+# automation are still caught normally. Requested by a real user (forum
+# feedback, "Micha") who wanted one particular flaky error (a transient
+# SONOS connection error) ignored without losing coverage of everything
+# else that automation might fail on. Plain substrings, not regex (Micha's
+# own framing: "diesen Text würde ich versuchen [zu ignorieren]") - simple
+# case-sensitive `in` containment check, see coordinator.py
+# `_is_ignored_error`.
+CONF_IGNORED_ERROR_TEXTS = "ignored_error_texts"
+DEFAULT_IGNORED_ERROR_TEXTS: list[str] = []
+
 SCOPE_FAILED_AUTOMATIONS = "failed_automations"
 SCOPE_LINKED_ENTITIES_UNAVAILABLE = "linked_entities_unavailable"
 EXCLUSION_SCOPES = [SCOPE_FAILED_AUTOMATIONS, SCOPE_LINKED_ENTITIES_UNAVAILABLE]
