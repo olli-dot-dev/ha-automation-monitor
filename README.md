@@ -127,11 +127,19 @@ manually day to day:
   its `automations` attribute; see Recommended display / Recommended
   notification automation below for ready-to-use ways to surface it on a
   dashboard or as a notification
+- **A consolidated automation with several independent triggers** (e.g.
+  one automation reacting separately to presence, a remote, and the sun's
+  position via a `choose:`) can appear more than once in `automations` at
+  the same time - one entry per currently-failing trigger, not one entry
+  per automation. A successful run on a *different* trigger no longer
+  clears an unrelated trigger's still-tracked failure just because they
+  happen to share one automation entity_id
 - **`sensor.linked_entities_unavailable`** reflects entities referenced by
   your automations/scripts/scenes that have been unreachable past the
   configured threshold, in its `entities` attribute
-- Call `automation_monitor.reset` to clear a stuck failure entry without
-  waiting for a restart or a successful re-run (see Actions)
+- Call `automation_monitor.reset` to clear a stuck failure entry (or
+  entries) without waiting for a restart or a successful re-run (see
+  Actions)
 - Call `automation_monitor.rebuild_linked_entities` right after editing a
   script's content, to pick up the change immediately instead of waiting
   for the periodic safety-net rebuild (see Actions)
@@ -365,7 +373,9 @@ Failure classification) back to zero, so it doesn't immediately re-flag
 itself on the next failure:
 
 - No target: clears all currently tracked failures.
-- `entity_id: automation.xyz`: clears only that automation's entry, if present.
+- `entity_id: automation.xyz`: clears all of that automation's entries, if
+  any - a consolidated automation with several independent triggers (see
+  Usage above) can have more than one tracked at once.
 
 `automation_monitor.rebuild_linked_entities` immediately rebuilds the
 automation/script/scene → referenced-entity map used by the

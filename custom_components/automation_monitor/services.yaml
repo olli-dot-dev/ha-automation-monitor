@@ -6,7 +6,10 @@ reset:
   fields:
     entity_id:
       name: Automation
-      description: Only clear this automation's failure entry, if present.
+      description: >-
+        Only clear this automation's failure entries, if any (a
+        consolidated automation with several independent triggers can
+        have more than one tracked at once).
       required: false
       example: automation.bewaesserung_garten
       selector:

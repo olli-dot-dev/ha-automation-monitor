@@ -32,6 +32,7 @@ from .const import (
     SCOPE_FAILED_AUTOMATIONS,
 )
 from .labels import entity_has_excluded_label
+from .trigger_fingerprint import trigger_fingerprint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,21 +53,42 @@ TRACE_POLL_MAX_ATTEMPTS = 60
 
 
 class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
-    """Holds entity_id -> failure-info for all currently failed automations."""
+    """Holds failure-info for every currently-failed (automation entity_id,
+    triggering-trigger) pair - see GH #5. A consolidated automation with
+    several independent triggers is really several independent pieces of
+    logic sharing one entity_id: keying purely on entity_id (this
+    project's original approach through v0.10.0) meant a successful run
+    on one trigger's branch wrongly cleared a still-broken *other*
+    trigger's branch, since both only ever wrote to the same slot. Both
+    `.data` and `._streaks` below are keyed by `_path_key(entity_id,
+    fingerprint)` instead - see trigger_fingerprint.py for what
+    `fingerprint` identifies and why. The real entity_id is always still
+    available from `info["entity_id"]` inside each `.data` value; nothing
+    downstream (sensor.py, issues.py, __init__.py's event firing) needs to
+    know or care that a key isn't a bare entity_id."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.data: dict[str, dict[str, Any]] = {}
         self._entry = entry
         self._remove_listener: Any = None
-        # Consecutive-failure count per automation entity_id, purely
-        # in-memory (not persisted across restarts, same as `.data` -
-        # see README "A Home Assistant restart resets both sensors").
+        # Consecutive-failure count per _path_key(entity_id, fingerprint),
+        # purely in-memory (not persisted across restarts, same as `.data`
+        # - see README "A Home Assistant restart resets both sensors").
         # Only ever incremented/reset here in _async_process_trigger and
         # via reset(); never written to directly from __init__.py, unlike
         # `.data` (kept encapsulated since the reset service needs to
         # touch both together - see reset()).
         self._streaks: dict[str, int] = {}
+
+    @staticmethod
+    def _path_key(entity_id: str, fingerprint: str) -> str:
+        """The dict key `.data`/`._streaks` are actually keyed by - see
+        class docstring. "::" can't collide with a real entity_id (which
+        never contains a colon) or a trigger_fingerprint() result (a
+        trace-derived idx/id, or the "manual" sentinel - none of HA's own
+        trigger id defaults contain "::")."""
+        return f"{entity_id}::{fingerprint}"
 
     @property
     def _excluded_labels(self) -> set[str]:
@@ -112,7 +134,12 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         or more entities with their own override (CONF_ENTITY_STREAK_OVERRIDES),
         in which case the *highest* matching override wins (if this
         automation touches several overridden entities, treat it as
-        tolerantly as the flakiest one among them).
+        tolerantly as the flakiest one among them). Since v0.10.1 the
+        streak this is compared against is counted per-trigger, not per
+        automation (see path_key in _async_process_trigger / GH #5) - the
+        threshold itself still applies to the whole automation regardless
+        of which of its triggers is failing, only the counter it's
+        compared against changed.
 
         Matched via HA's own `entities_in_automation` - direct entity_id
         references only (triggers/conditions/actions), same as the
@@ -138,16 +165,30 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
         return self._default_streak_threshold
 
     def reset(self, entity_id: str | None) -> None:
-        """Clear a tracked failure (or all of them) and its streak count
-        together - used by the automation_monitor.reset service. Streak
-        must be cleared alongside `.data`, not left behind: otherwise a
-        "reset" automation that had already reached its streak threshold
-        would re-flag itself on its very next failure instead of needing
-        a fresh streak from zero, silently defeating the point of the
-        threshold right after a reset."""
+        """Clear every tracked failure for `entity_id` (or literally all
+        of them, across every automation, with no target) and their
+        streak counts together - used by the automation_monitor.reset
+        service. Streaks must be cleared alongside `.data`, not left
+        behind: otherwise a "reset" automation that had already reached
+        its streak threshold would re-flag itself on its very next
+        failure instead of needing a fresh streak from zero, silently
+        defeating the point of the threshold right after a reset.
+
+        "Every tracked failure for `entity_id`", plural, since v0.10.1
+        (GH #5): one automation can now have several independent
+        triggers each holding their own tracked failure (see class
+        docstring) - the service has no way to target one specific
+        trigger, and clearing only one of an automation's several
+        entries while leaving others behind would be a surprising half-
+        reset. `.data`/`._streaks` share the same `_path_key(entity_id,
+        ...)`-prefixed key format, so a simple prefix match finds all of
+        them without needing to inspect each entry's `info["entity_id"]`."""
         if entity_id:
-            self.data.pop(entity_id, None)
-            self._streaks.pop(entity_id, None)
+            prefix = self._path_key(entity_id, "")
+            for key in [k for k in self.data if k.startswith(prefix)]:
+                self.data.pop(key, None)
+            for key in [k for k in self._streaks if k.startswith(prefix)]:
+                self._streaks.pop(key, None)
         else:
             self.data.clear()
             self._streaks.clear()
@@ -193,6 +234,14 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
             # leave existing state untouched rather than guessing.
             return
 
+        # Which of entity_id's own triggers caused this particular run
+        # (see trigger_fingerprint.py / GH #5) - `.data`/`._streaks` below
+        # are keyed by (entity_id, fingerprint) together, not entity_id
+        # alone, so a healthy trigger B succeeding can't wipe out a still-
+        # broken trigger A's independently-tracked failure just because
+        # they happen to share one automation entity.
+        path_key = self._path_key(entity_id, trigger_fingerprint(trace))
+
         script_execution = trace.get("script_execution")
         last_step = trace.get("last_step")
         aborted_step_had_error = self._step_had_error(trace, last_step)
@@ -231,8 +280,12 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
                 # from an earlier *different* failure) left untouched.
                 return
 
-            streak = self._streaks.get(entity_id, 0) + 1
-            self._streaks[entity_id] = streak
+            # Consecutive failures *of this specific trigger*, not of the
+            # automation as a whole (see path_key above) - an unrelated
+            # trigger on the same automation succeeding in between no
+            # longer resets this count.
+            streak = self._streaks.get(path_key, 0) + 1
+            self._streaks[path_key] = streak
             threshold = self._effective_streak_threshold(entity_id)
             if streak >= threshold:
                 # Refreshed every time this fires, even if already
@@ -240,7 +293,7 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
                 # keeps last_error_time/error_message current rather
                 # than frozen at whichever failure first crossed the
                 # threshold.
-                self.data[entity_id] = {
+                self.data[path_key] = {
                     "entity_id": entity_id,
                     "name": self._async_get_name(entity_id),
                     "unique_id": self._async_get_unique_id(entity_id),
@@ -254,8 +307,12 @@ class AutomationMonitorCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any
             # always flags on this branch, same as before this feature
             # existed.
         else:
-            self._streaks.pop(entity_id, None)
-            self.data.pop(entity_id, None)
+            # Only this trigger's own streak/entry is cleared - a
+            # successful run on trigger B must not clear trigger A's
+            # still-tracked failure just because they share entity_id
+            # (see path_key above / GH #5).
+            self._streaks.pop(path_key, None)
+            self.data.pop(path_key, None)
 
         self.async_set_updated_data(self.data)
 

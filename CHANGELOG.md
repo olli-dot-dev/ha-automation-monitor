@@ -2,6 +2,49 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.10.1] - 2026-09-07
+
+- Fixed: a consolidated automation with several independent triggers
+  (e.g. one "lighting automation" reacting separately to presence
+  detectors, a remote control, and the sun's position via a `choose:`)
+  could lose a tracked failure without it ever being fixed. `.data`/the
+  streak counter were keyed purely by automation entity_id - a successful
+  run on one trigger's branch wrongly cleared a still-broken *other*
+  trigger's branch, since both only ever wrote to the one slot shared by
+  the whole automation, even though Home Assistant's own trace history
+  kept showing the original error. Reported by **@schabau** (issue #5),
+  with a real multi-trigger automation and a screenshot of the mismatch
+  between HA's trace view and `sensor.failed_automations`.
+
+  New `trigger_fingerprint.py` identifies which of an automation's
+  configured triggers actually caused a given run (`trigger.id` from the
+  trace's trigger step, which HA itself already defaults to the
+  trigger's list position when the user hasn't set an explicit `id:`),
+  falling back to a constant sentinel for a manually-triggered run (the
+  `automation.trigger` service, "Run actions" in the UI, ...). The
+  coordinator now keys `.data`/the streak counter by (entity_id,
+  fingerprint) together instead of entity_id alone, so independent
+  triggers on the same automation are tracked - and can independently
+  fail, recover, and build up their own consecutive-failure streak -
+  without clobbering each other. `automation_monitor.reset
+  entity_id: automation.xyz` still clears *all* of that automation's
+  entries at once (there's no way to target one specific trigger), not
+  just one - see README "Actions".
+
+  One practical effect: `sensor.failed_automations`'s `automations`
+  attribute can now list the *same* automation more than once at the
+  same time, one entry per currently-failing trigger - a Lovelace card
+  or notification automation iterating that attribute already handles
+  this correctly with no changes needed, since it was always a list.
+
+  Verified against a live HA 2026.7.4 instance (2026-09-07): a real
+  two-trigger test automation confirmed the trace's trigger-step shape
+  (`trigger/<idx>`, `changed_variables.trigger.id`) this relies on, for
+  both a normal trigger firing and a manually-triggered run - not
+  documented public API, see trigger_fingerprint.py module docstring.
+  `python -m py_compile` and the full pytest suite (including new
+  tests/test_trigger_fingerprint.py) pass.
+
 ## [0.10.0] - 2026-08-26
 
 - Added: **ignored error texts** - a new General settings option, a

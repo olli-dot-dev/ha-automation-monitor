@@ -81,9 +81,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass,
             prefix=ISSUE_PREFIX_FAILED_AUTOMATION,
             enabled=entry.options.get(CONF_NOTIFY_FAILED_AUTOMATIONS, DEFAULT_NOTIFY),
+            # Keyed by failures_coordinator's own (entity_id, trigger)
+            # path key (see coordinator.py class docstring / GH #5), not a
+            # bare entity_id - _sync_issues only ever uses this as an
+            # opaque, already-unique issue_id suffix, so one automation
+            # with several independently-failing triggers now correctly
+            # gets one Repairs issue each instead of one clobbering
+            # another's.
             current={
-                entity_id: failed_automation_placeholders(info)
-                for entity_id, info in failures_coordinator.data.items()
+                key: failed_automation_placeholders(info)
+                for key, info in failures_coordinator.data.items()
             },
             translation_key=ISSUE_PREFIX_FAILED_AUTOMATION,
         )
@@ -138,25 +145,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # current-state-only design (see README "Usage") - the same tradeoff
     # already accepted for the Repairs-issue sync's initial full-reconcile
     # call above.
-    _last_failed_ids: set[str] = set()
+    # Maps failures_coordinator's own (entity_id, trigger) path key (see
+    # coordinator.py class docstring / GH #5) to its real entity_id, as of
+    # the last time this ran - NOT a bare set of entity_ids, since one
+    # entity_id can now have several independently-tracked keys (one per
+    # failing trigger) at once. The "resolved" side below needs this
+    # mapping precisely because a key that just disappeared from
+    # `.data` can no longer be looked up there for its entity_id.
+    _last_failed_snapshot: dict[str, str] = {}
     _last_unavailable_ids: set[str] = set()
 
     @callback
     def _fire_failure_events() -> None:
-        nonlocal _last_failed_ids
-        current_ids = set(failures_coordinator.data)
-        for entity_id in current_ids - _last_failed_ids:
-            info = failures_coordinator.data[entity_id]
+        nonlocal _last_failed_snapshot
+        current_snapshot = {
+            key: info["entity_id"] for key, info in failures_coordinator.data.items()
+        }
+        for key in set(current_snapshot) - set(_last_failed_snapshot):
+            info = failures_coordinator.data[key]
             hass.bus.async_fire(
                 EVENT_FAILURE_DETECTED,
                 {
-                    ATTR_ENTITY_ID: entity_id,
+                    ATTR_ENTITY_ID: info["entity_id"],
                     ATTR_NAME: info["name"],
                     "error_message": info["error_message"],
                     "error_step": info["error_step"],
                 },
             )
-        for entity_id in _last_failed_ids - current_ids:
+        for key in set(_last_failed_snapshot) - set(current_snapshot):
+            entity_id = _last_failed_snapshot[key]
             state = hass.states.get(entity_id)
             hass.bus.async_fire(
                 EVENT_FAILURE_RESOLVED,
@@ -165,7 +182,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     ATTR_NAME: state.name if state else entity_id,
                 },
             )
-        _last_failed_ids = current_ids
+        _last_failed_snapshot = current_snapshot
 
     @callback
     def _fire_linked_entity_events() -> None:
