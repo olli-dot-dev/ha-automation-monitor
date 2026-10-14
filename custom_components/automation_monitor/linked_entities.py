@@ -27,6 +27,34 @@ UNAVAILABLE_LIKE_STATES = frozenset({"unavailable"})
 TransitionAction = Literal["start", "cancel", "noop"]
 
 
+def split_static_references(
+    references: Iterable[object],
+) -> tuple[set[str], list[object]]:
+    """Split HA's "referenced entities" into static entity_id strings and
+    everything else, returned as (kept, skipped).
+
+    HA's own `entities_in_automation`/`entities_in_script` skip a templated
+    entity_id only when it's the whole value (`entity_id: "{{ x }}"`). A
+    template *inside a list* (`entity_id: ["{{ x }}"]`, or mixed
+    `[light.a, "{{ x }}"]`) comes back as a raw `Template` object next to
+    the real strings - verified against HA 2026.7.4 and 2026.10.1
+    (`homeassistant/helpers/script.py`, `_referenced_extract_ids`). One of
+    those reaching `async_track_state_change_event` crashed the whole
+    rebuild (GitHub issue #6), leaving the sensor silently stuck at 0 for
+    *all* automations. A template can't be resolved statically, so it's
+    skipped rather than guessed - same rule as templated device/area
+    targets (see linked_entities_coordinator._referenced_entities_for).
+    """
+    kept: set[str] = set()
+    skipped: list[object] = []
+    for reference in references:
+        if isinstance(reference, str):
+            kept.add(reference)
+        else:
+            skipped.append(reference)
+    return kept, skipped
+
+
 def build_reference_map(
     source_entities: dict[str, Iterable[str]],
     ignored: Iterable[str] = (),

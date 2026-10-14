@@ -20,9 +20,49 @@ _linked_entities = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_linked_entities)
 
 build_reference_map = _linked_entities.build_reference_map
+split_static_references = _linked_entities.split_static_references
 decide_transition = _linked_entities.decide_transition
 time_remaining_until_flag = _linked_entities.time_remaining_until_flag
 UNAVAILABLE_LIKE_STATES = _linked_entities.UNAVAILABLE_LIKE_STATES
+
+
+# --- split_static_references -----------------------------------------------
+
+
+class _FakeTemplate:
+    """Stands in for homeassistant.helpers.template.Template - what HA's
+    own reference helpers hand back for a template inside a list. Only its
+    not-being-a-str matters here."""
+
+    def __repr__(self):
+        return "Template<{{ trigger.entity_id }}>"
+
+
+def test_split_static_references_keeps_plain_entity_ids():
+    kept, skipped = split_static_references({"light.a", "switch.b"})
+    assert kept == {"light.a", "switch.b"}
+    assert skipped == []
+
+
+def test_split_static_references_drops_a_template_from_a_list():
+    """GitHub issue #6: `entity_id: ["{{ trigger.entity_id }}"]` comes back
+    as a raw Template object and used to crash the whole rebuild."""
+    template = _FakeTemplate()
+    kept, skipped = split_static_references([template])
+    assert kept == set()
+    assert skipped == [template]
+
+
+def test_split_static_references_mixed_list_keeps_the_static_part():
+    """`[light.a, "{{ x }}"]` - the static entity is still monitored."""
+    template = _FakeTemplate()
+    kept, skipped = split_static_references(["light.a", template])
+    assert kept == {"light.a"}
+    assert skipped == [template]
+
+
+def test_split_static_references_empty_input():
+    assert split_static_references([]) == (set(), [])
 
 
 # --- build_reference_map ---------------------------------------------------

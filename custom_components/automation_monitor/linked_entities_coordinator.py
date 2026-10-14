@@ -76,6 +76,7 @@ from .linked_entities import (
     UNAVAILABLE_LIKE_STATES,
     build_reference_map,
     decide_transition,
+    split_static_references,
     time_remaining_until_flag,
 )
 
@@ -100,14 +101,16 @@ def _extract_target_ids(data: Any, key: str) -> list[str]:
     list forms HA's schema allows. A templated (dynamic) value is
     neither a `str` nor a `list` (it's a `template.Template` instance) -
     falls through to `[]`, i.e. skipped rather than guessed, same as HA's
-    own (module-private, so not importable) `Script._referenced_extract_ids`."""
+    own (module-private, so not importable) `Script._referenced_extract_ids`.
+    Templates *inside* a list are allowed by HA's schema too, and HA's own
+    helper lets those through - dropped here (GitHub issue #6)."""
     if not isinstance(data, dict):
         return []
     value = data.get(key)
     if isinstance(value, str):
         return [value]
     if isinstance(value, list):
-        return value
+        return [item for item in value if isinstance(item, str)]
     return []
 
 
@@ -292,7 +295,9 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
       whole `action:` string, are not resolvable statically either way -
       skipped, not guessed. Same static-analysis limit Watchman already
       has for entity-existence checks, just for availability instead of
-      existence.
+      existence. This includes templates HA's own direct-reference
+      helpers let through inside a list - see
+      linked_entities.split_static_references (GitHub issue #6).
     """
     if domain == "automation":
         from homeassistant.components.automation import entities_in_automation
@@ -307,7 +312,15 @@ def _referenced_entities_for(hass: HomeAssistant, domain: str, entity_id: str) -
 
         direct = entities_in_scene(hass, entity_id)
 
-    referenced: set[str] = set(direct)
+    referenced, skipped = split_static_references(direct)
+    if skipped:
+        _LOGGER.debug(
+            "Skipping %d templated reference(s) in %s, not resolvable "
+            "statically: %s",
+            len(skipped),
+            entity_id,
+            skipped,
+        )
 
     if domain == "scene":
         return referenced

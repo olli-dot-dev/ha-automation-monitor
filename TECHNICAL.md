@@ -227,7 +227,12 @@ rebuild instead of waiting up to 20 minutes after a script or scene edit.
 
 Templated `entity_id`/`device_id`/`area_id` targets are not resolvable
 statically - same limitation Watchman already has for entity-existence
-checks, just for availability instead of existence. Like the trace access
+checks, just for availability instead of existence. They're skipped, not
+guessed - including a template *inside a list*
+(`entity_id: ["{{ trigger.entity_id }}"]`, or mixed with static entities),
+which Home Assistant's own reference helpers pass through as a raw
+`Template` object rather than skipping. Static entities next to such a
+template are still monitored. Like the trace access
 above, this relies on internal-ish HA behavior (event names, registry
 helper functions) that isn't a fully documented stable API.
 

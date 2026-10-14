@@ -2,6 +2,39 @@
 
 All notable changes to Automation Monitor are documented here.
 
+## [0.10.2] - 2026-10-14
+
+- Fixed: `sensor.linked_entities_unavailable` could get stuck at `0` for
+  good - reporting "nothing is unavailable" while monitoring nothing at
+  all - as soon as a single automation or script used a templated
+  `entity_id` *inside a list*, e.g.
+  `entity_id: ["{{ trigger.entity_id }}"]` or a mix like
+  `[light.a, "{{ x }}"]` (in `target:` or `data:`). Home Assistant's own
+  reference helpers skip a template only when it's the whole value
+  (`entity_id: "{{ x }}"`); inside a list it comes back as a raw
+  `Template` object next to the real entity_ids. That object reached
+  `async_track_state_change_event`, which crashed the whole rebuild
+  (`AttributeError: 'Template' object has no attribute 'lower'`) before
+  any state subscription was registered - on every start, and with an
+  HTTP 500 from `automation_monitor.rebuild_linked_entities`. One such
+  automation cost the sensor for *all* automations. Reported by
+  **@CaptMilkbeard** (issue #6), with a full traceback and a precise
+  analysis of the cause.
+
+  Templates are now skipped there, the same way templated device/area
+  targets already were (logged at debug level), and static entities in
+  the same list are still monitored. The same list case is now also
+  filtered for `device_id`/`area_id` targets - that path never crashed,
+  but could look up a template object in the registries.
+
+  Verified against a live HA 2026.7.4 instance (2026-10-14): reproduced
+  the crash and HTTP 500 with a list-form templated target on v0.10.1;
+  after the fix, the rebuild succeeds, and a static entity sharing a
+  list with a template was correctly flagged after going unavailable.
+  Checked against HA 2026.7.4 and 2026.10.1 source that HA passes
+  list-form templates through unchanged. The full pytest suite
+  (including new `split_static_references` tests) passes.
+
 ## [0.10.1] - 2026-09-07
 
 - Fixed: a consolidated automation with several independent triggers
